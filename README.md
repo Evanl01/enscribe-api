@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Enscribe API
+
+A comprehensive healthcare management platform built with [Next.js](https://nextjs.org) for managing patient encounters, SOAP notes, recordings, and transcripts with advanced AI-powered features.
+
+## Overview
+
+Enscribe API is a full-stack telemedicine application designed for healthcare providers to efficiently manage patient interactions, generate clinical documentation, and transcribe medical recordings. The platform integrates with Google Cloud Platform (GCP) and AWS services for transcription, AI processing, and data masking.
+
+## Features
+
+- **Patient Encounter Management** - Create, view, and edit patient encounters
+- **SOAP Notes** - Generate and manage SOAP (Subjective, Objective, Assessment, Plan) notes
+- **Audio Recording & Transcription** - Record, upload, and transcribe patient interactions
+- **AI-Powered Processing** - Integration with Google Gemini and OpenAI for note generation
+- **Dot Phrases** - Custom medical phrase templates for quick documentation
+- **PHI Masking** - AWS-powered Protected Health Information masking
+- **Authentication** - Secure user authentication with email verification
+- **Data Privacy** - Row-level security policies in the database
+- **Mobile Support** - React Native mobile application
+
+## Project Structure
+
+```
+enscribe-api/
+├── src/
+│   ├── app/              # Next.js App Router pages and layouts
+│   ├── components/       # React components
+│   ├── hooks/           # Custom React hooks
+│   ├── pages/api/       # API routes and endpoints
+│   └── utils/           # Utility functions and helpers
+├── mobile/              # React Native mobile app
+├── public/              # Static assets and client-side scripts
+├── sql/                 # Database schemas and triggers
+└── keys/                # SSH keys (for deployment)
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 16+ and npm/yarn
+- Supabase account for database
+- Google Cloud Platform credentials (for transcription)
+- AWS credentials (for PHI masking)
+- OpenAI API key (optional)
+
+### Installation
+
+```bash
+# Install dependencies
+npm install
+```
+
+### Development
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+### Build for Production
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
+
+## API Endpoints
+
+Key API routes available in `/src/pages/api/`:
+
+- `auth.js` - Authentication endpoints
+- `patient-encounters.js` - Patient encounter CRUD operations
+- `soap-notes.js` - SOAP note management
+- `recordings.js` - Recording upload/download
+- `transcripts.js` - Transcript management
+- `dot-phrases.js` - Dot phrase operations
+- `gcp/transcribe.js` - GCP transcription service
+- `aws/mask-phi.js` - AWS PHI masking service
+
+## Database
+
+The application uses Supabase (PostgreSQL) with:
+- Row-Level Security (RLS) policies
+- Automated triggers for timestamp updates
+- Foreign key constraints and referential integrity
+
+See `/sql/` for database schema and policies.
+
+## Environment Variables
+
+Create a `.env.local` file with:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+GOOGLE_CLOUD_PROJECT_ID=
+GOOGLE_CLOUD_PRIVATE_KEY=
+GOOGLE_CLOUD_CLIENT_EMAIL=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+OPENAI_API_KEY=
+```
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Supabase Documentation](https://supabase.com/docs)
+- [Google Cloud Speech-to-Text](https://cloud.google.com/speech-to-text/docs)
+- [AWS Comprehend Medical](https://aws.amazon.com/comprehend/medical/)
