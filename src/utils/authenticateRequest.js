@@ -1,4 +1,4 @@
-import { getSupabaseClient } from './supabase';
+import { getSupabaseClient } from './supabase.js';
 /**
  * Extracts and verifies the JWT token from the request headers.
  * @param {object} req - The Next.js API request object.

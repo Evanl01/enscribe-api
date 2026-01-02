@@ -7,16 +7,31 @@ using (
     user_id = (SELECT auth.uid())
 );
 
-create policy "Users can modify their own patientEncounters (except user_id)"
+create policy "Users can insert their own patientEncounters"
 on "public"."patientEncounters"
 as PERMISSIVE
-for ALL
+for INSERT
 to authenticated
-using (
-    user_id = (SELECT auth.uid())
-)
 with check (  
     user_id = (SELECT auth.uid()) AND
     user_id IS NOT NULL
 );
+
+create policy "Users can update their own patientEncounters"
+on "public"."patientEncounters"
+as PERMISSIVE
+for UPDATE
+to authenticated
+using (user_id = (SELECT auth.uid()))
+with check (  
+    user_id = (SELECT auth.uid()) AND
+    user_id IS NOT NULL
+);
+
+create policy "Users can delete their own patientEncounters"
+on "public"."patientEncounters"
+as PERMISSIVE
+for DELETE
+to authenticated
+using (user_id = (SELECT auth.uid()));
 

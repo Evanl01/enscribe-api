@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/test-results
+tests/testData.json
+tests/fixtures/*
+!tests/fixtures/README.txt
 
 # next.js
 /.next/

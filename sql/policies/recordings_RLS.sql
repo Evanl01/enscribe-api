@@ -7,39 +7,36 @@ using (
     user_id = (SELECT auth.uid())
 );
 
-create policy "Users can modify their own recordings (except user_id)"
+create policy "Users can insert their own recordings"
 on "public"."recordings"
 as PERMISSIVE
-for ALL
+for INSERT
 to authenticated
-using (
-    user_id = (SELECT auth.uid())
-)
 with check (  
     user_id = (SELECT auth.uid()) AND
-    user_id IS NOT NULL
+    user_id IS NOT NULL AND
+    "patientEncounter_id" IN (
+        SELECT id FROM public."patientEncounters" WHERE user_id = (select auth.uid())
+    )
 );
 
-CREATE POLICY "Users can insert recordings (if they own FK patientEncounter_id)"
-ON public."recordings"
-AS PERMISSIVE
-FOR INSERT
-TO authenticated
-WITH CHECK (
-  user_id = auth.uid() AND
-  "patientEncounter_id" IN (
-    SELECT id FROM public."patientEncounters" WHERE user_id = auth.uid()
-  )
+create policy "Users can update their own recordings"
+on "public"."recordings"
+as PERMISSIVE
+for UPDATE
+to authenticated
+using (user_id = (SELECT auth.uid()))
+with check (
+    user_id = (SELECT auth.uid()) AND
+    user_id IS NOT NULL AND
+    "patientEncounter_id" IN (
+        SELECT id FROM public."patientEncounters" WHERE user_id = (select auth.uid())
+    )
 );
 
-CREATE POLICY "Users can update recordings (if they own FK patientEncounter_id)"
-ON public."recordings"
-AS PERMISSIVE
-FOR UPDATE
-TO authenticated
-WITH CHECK (
-  user_id = auth.uid() AND
-  "patientEncounter_id" IN (
-    SELECT id FROM public."patientEncounters" WHERE user_id = auth.uid()
-  )
-);
+create policy "Users can delete their own recordings"
+on "public"."recordings"
+as PERMISSIVE
+for DELETE
+to authenticated
+using (user_id = (SELECT auth.uid()));

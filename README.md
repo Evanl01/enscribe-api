@@ -104,9 +104,65 @@ AWS_SECRET_ACCESS_KEY=
 OPENAI_API_KEY=
 ```
 
+## Architecture Migration: Next.js → Fastify Backend
+
+### Current State (Hybrid)
+- **Frontend**: Next.js (`npm run dev` on port 3000)
+- **Backend**: Fastify (`npm run dev:fastify` on port 3001)
+- Both run simultaneously; Next.js proxies `/api/*` to Fastify
+
+```bash
+# Terminal 1: Backend
+npm run dev:fastify
+
+# Terminal 2: Frontend
+npm run dev
+```
+
+### Final State (Fastify-Only Backend)
+When migration completes, this repo becomes **pure backend API only**:
+
+```
+src/
+├── controllers/              # (was src/fastify/controllers/)
+│   ├── authController.js
+│   ├── patientEncountersController.js
+│   ├── dotPhrasesController.js
+│   ├── recordingsController.js
+│   ├── soapNotesController.js
+│   └── transcriptsController.js
+├── routes/                   # (was src/fastify/routes/)
+│   ├── auth.js
+│   ├── patientEncounters.js
+│   ├── dotPhrases.js
+│   ├── recordings.js
+│   ├── soapNotes.js
+│   └── transcripts.js
+├── schemas/                  # (was src/fastify/schemas/)
+│   ├── patientEncounter.js
+│   ├── soapNote.js
+│   ├── recording.js
+│   ├── transcript.js
+│   ├── dotPhrase.js
+│   └── regex.js
+├── plugins/
+│   └── authentication.js     # Fastify auth decorator
+├── server.js                 # Main entry point
+└── utils/                    # Shared utilities (supabase, encryption, etc)
+```
+
+**Run command after flattening:**
+```bash
+npm run dev  # Runs src/server.js on port 3001
+```
+
+**Frontend moves to separate repo:**
+- All `src/app/`, `src/components/`, `public/` → `enscribe-frontend/`
+- Next.js remains lightweight frontend, proxies to this backend
+
 ## Learn More
 
-- [Next.js Documentation](https://nextjs.org/docs)
+- [Fastify Documentation](https://www.fastify.io/docs/latest/)
 - [Supabase Documentation](https://supabase.com/docs)
 - [Google Cloud Speech-to-Text](https://cloud.google.com/speech-to-text/docs)
 - [AWS Comprehend Medical](https://aws.amazon.com/comprehend/medical/)
