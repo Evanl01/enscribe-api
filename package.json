@@ -13,7 +13,7 @@
     "test": "node tests/runAll.js",
     "test:auth": "node tests/auth.test.js",
     "test:aws": "node tests/aws.test.js",
-    "test:dotphrases": "node tests/dotphrases.test.js",
+    "test:dot-phrases": "node tests/dot-phrases.test.js",
     "test:patient-encounters": "node tests/patient-encounters.test.js",
     "test:setup": "node tests/setup.test.js",
     "test:recordings": "node tests/recordings.test.js --all",

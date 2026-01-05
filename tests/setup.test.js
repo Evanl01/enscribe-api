@@ -391,7 +391,7 @@ async function setupTestData() {
       // Fetch existing dotPhrases for the user
       let existingDotPhrases = [];
       try {
-        const getResponse = await fetch('http://localhost:3001/api/dotphrases', {
+        const getResponse = await fetch('http://localhost:3001/api/dot-phrases', {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -417,7 +417,7 @@ async function setupTestData() {
         // If not in expected list or expansion doesn't match, delete it
         if (!expectedExpansion || expectedExpansion !== existing.expansion) {
           try {
-            const deleteResponse = await fetch(`http://localhost:3001/api/dotphrases/${existing.id}`, {
+            const deleteResponse = await fetch(`http://localhost:3001/api/dot-phrases/${existing.id}`, {
               method: 'DELETE',
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -448,7 +448,7 @@ async function setupTestData() {
         } else {
           // Create new or update
           try {
-            const response = await fetch('http://localhost:3001/api/dotphrases', {
+            const response = await fetch('http://localhost:3001/api/dot-phrases', {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -802,7 +802,7 @@ async function setupTestData() {
     
     for (const phrase of dotPhrasesToCreate) {
       try {
-        const response = await fetch('http://localhost:3001/api/dotphrases', {
+        const response = await fetch('http://localhost:3001/api/dot-phrases', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,

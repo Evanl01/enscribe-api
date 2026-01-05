@@ -167,8 +167,8 @@ async function runPatientEncounterTests() {
   // Test 7: Mark encounter as complete without auth (should fail)
   await runner.test('Mark encounter as complete without auth', {
     method: 'POST',
-    endpoint: '/api/patient-encounters/test-id/complete',
-    body: { notes: 'Test notes' },
+    endpoint: '/api/patient-encounters/complete',
+    body: { encounterId: 'test-id', notes: 'Test notes' },
     expectedStatus: 401,
   });
 
@@ -481,8 +481,9 @@ async function runPatientEncounterTests() {
         // Test 17: Mark encounter as complete with invalid ID format
         await runner.test('Mark encounter as complete with invalid ID format', {
           method: 'POST',
-          endpoint: '/api/patient-encounters/invalid-id-format/complete',
+          endpoint: '/api/patient-encounters/complete',
           body: {
+            encounterId: 'invalid-id-format',
             notes: 'Appointment completed successfully',
           },
           headers: {

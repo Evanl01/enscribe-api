@@ -412,8 +412,18 @@ export async function batchPatientEncounters(request, reply) {
 }
 
 /**
- * Mark a patient encounter as complete
- * POST /api/patient-encounters/:id/complete
+ * Create a complete patient encounter bundle
+ * POST /api/patient-encounters/complete
+ * 
+ * Creates a patient encounter with linked recording, transcript, and SOAP notes
+ * Handles encryption, validation, and atomic transaction with rollback on failure
+ * 
+ * Request body: {
+ *   patientEncounter: { name, ... },
+ *   recording: { recording_file_path, ... },
+ *   transcript: { transcript_text, ... },
+ *   soapNote_text: { section1, section2, ... }
+ * }
  */
 export async function completePatientEncounter(request, reply) {
   try {
@@ -424,40 +434,16 @@ export async function completePatientEncounter(request, reply) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    const { id } = request.params;
-    const { notes, completedAt } = request.body;
-
-    // Validate bigint ID format
-    if (!isValidBigInt(id)) {
-      return reply.status(400).send({ error: 'Invalid ID format - must be a numeric ID' });
-    }
-
-    const updateData = {
-      completed: true,
-      completed_at: completedAt || new Date().toISOString(),
-    };
-
-    if (notes) {
-      updateData.notes = notes;
-    }
-
-    const { data, error } = await supabase
-      .from(patientEncounterTable)
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return reply.status(404).send({ error: 'Encounter not found' });
-      }
-      return reply.status(500).send({ error: error.message });
-    }
-
-    return reply.status(200).send(data);
+    // TODO: Implement complete encounter bundle creation
+    // This should mirror the pages/api/patient-encounters/complete.js POST logic
+    // - Validate all 4 input objects (patientEncounter, recording, transcript, soapNote_text)
+    // - Generate encryption keys & IVs
+    // - Encrypt & save all 4 entities atomically
+    // - Implement ACID rollback on failure (cascading deletes)
+    
+    return reply.status(501).send({ error: 'Not yet implemented - migration pending from pages/api/patient-encounters/complete.js' });
   } catch (error) {
-    console.error('Error completing patient encounter:', error);
+    console.error('Error creating complete patient encounter:', error);
     return reply.status(500).send({ error: error.message });
   }
 }

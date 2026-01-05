@@ -12,7 +12,7 @@ import cors from '@fastify/cors';
 import authenticationPlugin from './plugins/authentication.js';
 import { ALLOWED_ORIGINS_LIST } from './middleware/cors.js';
 import authRoutes from './routes/auth.js';
-import dotPhrasesRoutes from './routes/dotPhrases.js';
+import dotPhrasesRoutes from './routes/dot-phrases.js';
 import patientEncountersRoutes from './routes/patientEncounters.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerTranscriptsRoutes } from './routes/transcripts.js';

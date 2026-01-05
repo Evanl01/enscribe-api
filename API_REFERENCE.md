@@ -578,7 +578,7 @@ Dot phrases are custom medical phrase templates that allow healthcare providers 
 ### Endpoints
 
 #### 1. Get All Dot Phrases
-**GET** `/api/dotphrases`
+**GET** `/api/dot-phrases`
 
 Retrieve all dot phrases for the authenticated user.
 
@@ -615,7 +615,7 @@ Retrieve all dot phrases for the authenticated user.
 
 **Example (JavaScript):**
 ```javascript
-const response = await fetch('/api/dotphrases?limit=50', {
+const response = await fetch('/api/dot-phrases?limit=50', {
   headers: {
     'Authorization': `Bearer ${accessToken}`
   }
@@ -631,7 +631,7 @@ dotPhrases.forEach(phrase => {
 ---
 
 #### 2. Get Single Dot Phrase
-**GET** `/api/dotphrases/{id}`
+**GET** `/api/dot-phrases/{id}`
 
 Retrieve a specific dot phrase by ID.
 
@@ -656,7 +656,7 @@ Retrieve a specific dot phrase by ID.
 
 **Example (JavaScript):**
 ```javascript
-const response = await fetch('/api/dotphrases/uuid-1234-5678', {
+const response = await fetch('/api/dot-phrases/uuid-1234-5678', {
   headers: {
     'Authorization': `Bearer ${accessToken}`
   }
@@ -672,7 +672,7 @@ if (response.ok) {
 ---
 
 #### 3. Create Dot Phrase
-**POST** `/api/dotphrases`
+**POST** `/api/dot-phrases`
 
 Create a new dot phrase.
 
@@ -706,7 +706,7 @@ Create a new dot phrase.
 
 **Example (JavaScript):**
 ```javascript
-const response = await fetch('/api/dotphrases', {
+const response = await fetch('/api/dot-phrases', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`,
@@ -727,7 +727,7 @@ if (response.ok) {
 ---
 
 #### 4. Update Dot Phrase
-**PATCH** `/api/dotphrases/{id}`
+**PATCH** `/api/dot-phrases/{id}`
 
 Update an existing dot phrase.
 
@@ -764,7 +764,7 @@ Update an existing dot phrase.
 
 **Example (JavaScript):**
 ```javascript
-const response = await fetch('/api/dotphrases/uuid-1234-5678', {
+const response = await fetch('/api/dot-phrases/uuid-1234-5678', {
   method: 'PATCH',
   headers: {
     'Authorization': `Bearer ${accessToken}`,
@@ -784,7 +784,7 @@ if (response.ok) {
 ---
 
 #### 5. Delete Dot Phrase
-**DELETE** `/api/dotphrases/{id}`
+**DELETE** `/api/dot-phrases/{id}`
 
 Delete a dot phrase.
 
@@ -801,7 +801,7 @@ Empty response body.
 
 **Example (JavaScript):**
 ```javascript
-const response = await fetch('/api/dotphrases/uuid-1234-5678', {
+const response = await fetch('/api/dot-phrases/uuid-1234-5678', {
   method: 'DELETE',
   headers: {
     'Authorization': `Bearer ${accessToken}`

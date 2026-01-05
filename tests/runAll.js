@@ -5,7 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runAuthTests } from './auth.test.js';
-import { runDotPhrasesTests } from './dotphrases.test.js';
+import { runDotPhrasesTests } from './dot-phrases.test.js';
 import { runPatientEncounterTests } from './patient-encounters.test.js';
 import { runRecordingsTests } from './recordings.test.js';
 import { runTranscriptsTests } from './transcripts.test.js';

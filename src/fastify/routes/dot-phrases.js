@@ -14,11 +14,11 @@ import {
  */
 export default fp(async function dotPhrasesRoutes(fastify, options) {
   /**
-   * GET /dotphrases/:id
+   * GET /dot-phrases/:id
    * Get a single dot phrase by ID (requires authentication)
    */
   fastify.get(
-    '/dotphrases/:id',
+    '/dot-phrases/:id',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
@@ -33,19 +33,19 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
 
         return reply.status(200).send(result.data);
       } catch (err) {
-        fastify.log.error('Error in GET /dotphrases/:id:', err);
+        fastify.log.error('Error in GET /dot-phrases/:id:', err);
         return reply.status(500).send({ error: 'Failed to fetch dot phrase' });
       }
     }
   );
 
-  console.log('dotPhrases plugin: registering GET /dotphrases (all)');
+  console.log('dotPhrases plugin: registering GET /dot-phrases (all)');
   fastify.get(
-    '/dotphrases',
+    '/dot-phrases',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
-        console.log('dotPhrases: GET /dotphrases called');
+        console.log('dotPhrases: GET /dot-phrases called');
         const supabase = getSupabaseClient(request.headers.authorization);
 
         const result = await getAllDotPhrasesForUser(request.user.id, supabase);
@@ -56,18 +56,18 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
 
         return reply.status(200).send(result.data);
       } catch (err) {
-        fastify.log.error('Error in GET /dotphrases:', err);
+        fastify.log.error('Error in GET /dot-phrases:', err);
         return reply.status(500).send({ error: 'Failed to fetch dot phrases' });
       }
     }
   );
 
   /**
-   * POST /dotphrases
+   * POST /dot-phrases
    * Create a new dot phrase (requires authentication)
    */
   fastify.post(
-    '/dotphrases',
+    '/dot-phrases',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
@@ -87,18 +87,18 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
 
         return reply.status(201).send(result.data);
       } catch (err) {
-        fastify.log.error('Error in POST /dotphrases:', err);
+        fastify.log.error('Error in POST /dot-phrases:', err);
         return reply.status(500).send({ error: 'Failed to create dot phrase' });
       }
     }
   );
 
   /**
-   * PATCH /dotphrases/:id
+   * PATCH /dot-phrases/:id
    * Update an existing dot phrase (requires authentication)
    */
   fastify.patch(
-    '/dotphrases/:id',
+    '/dot-phrases/:id',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
@@ -113,18 +113,18 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
 
         return reply.status(200).send(result.data);
       } catch (err) {
-        fastify.log.error('Error in PATCH /dotphrases/:id:', err);
+        fastify.log.error('Error in PATCH /dot-phrases/:id:', err);
         return reply.status(500).send({ error: 'Failed to update dot phrase' });
       }
     }
   );
 
   /**
-   * DELETE /dotphrases/:id
+   * DELETE /dot-phrases/:id
    * Delete a dot phrase (requires authentication)
    */
   fastify.delete(
-    '/dotphrases/:id',
+    '/dot-phrases/:id',
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
@@ -139,7 +139,7 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
 
         return reply.status(200).send({ success: true, data: result.data });
       } catch (err) {
-        fastify.log.error('Error in DELETE /dotphrases/:id:', err);
+        fastify.log.error('Error in DELETE /dot-phrases/:id:', err);
         return reply.status(500).send({ error: 'Failed to delete dot phrase' });
       }
     }

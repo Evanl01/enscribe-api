@@ -59,9 +59,9 @@ export async function registerPatientEncountersRoutes(fastify) {
     handler: batchPatientEncounters,
   });
 
-  // POST /patient-encounters/:id/complete
-  // Mark a patient encounter as complete
-  fastify.post('/patient-encounters/:id/complete', {
+  // POST /patient-encounters/complete
+  // Create a complete patient encounter bundle with recording, transcript, and SOAP notes
+  fastify.post('/patient-encounters/complete', {
     preHandler: [fastify.authenticate],
     handler: completePatientEncounter,
   });
