@@ -81,7 +81,7 @@ function EditSoapNoteInner() {
         if (!patientEncounterId)
           throw new Error("Associated Patient Encounter not found");
         const patientEncounterRes = await fetch(
-          `/api/patient-encounters/complete?id=${patientEncounterId}`,
+          `/api/patient-encounters/complete/${patientEncounterId}`,
           {
             headers: {
               Authorization: `Bearer ${api.getJWT()}`,

@@ -412,6 +412,140 @@ export async function batchPatientEncounters(request, reply) {
 }
 
 /**
+ * Get a complete patient encounter bundle
+ * GET /api/patient-encounters/complete/:id
+ * 
+ * Retrieves a patient encounter with all linked data:
+ * - Patient encounter details
+ * - Associated recording
+ * - Transcript for that recording
+ * - All SOAP notes for the encounter
+ * 
+ * All encrypted fields are decrypted before returning
+ */
+export async function getCompletePatientEncounter(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { id } = request.params;
+
+    // Validate ID format
+    if (!isValidBigInt(id)) {
+      return reply.status(400).send({ error: 'Invalid ID format - must be a numeric ID' });
+    }
+
+    const encounterId = parseInt(id);
+
+    // Step 0: Fetch patient encounter
+    const { data: encounterData, error: encounterError } = await supabase
+      .from(patientEncounterTable)
+      .select('*')
+      .eq('id', encounterId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (encounterError) {
+      if (encounterError.code === 'PGRST116') {
+        return reply.status(404).send({ error: 'Encounter not found' });
+      }
+      return reply.status(500).send({ error: encounterError.message });
+    }
+
+    // Decrypt AES key for this encounter
+    const aes_key = encryptionUtils.decryptAESKey(encounterData.encrypted_aes_key);
+
+    // Decrypt encounter name
+    if (encounterData.encrypted_name) {
+      encounterData.name = encryptionUtils.decryptText(
+        encounterData.encrypted_name,
+        aes_key,
+        encounterData.iv
+      );
+      delete encounterData.encrypted_name;
+    }
+
+    // Step 1: Fetch recording linked to encounter
+    const { data: recordingData, error: recordingError } = await supabase
+      .from('recordings')
+      .select('*')
+      .eq('patientEncounter_id', encounterId)
+      .single();
+
+    let recording = null;
+    if (recordingError && recordingError.code !== 'PGRST116') {
+      return reply.status(500).send({ error: recordingError.message });
+    } else if (recordingData) {
+      recording = recordingData;
+    }
+
+    // Step 2: Fetch transcript for recording
+    let transcript = null;
+    if (recording) {
+      const { data: transcriptData, error: transcriptError } = await supabase
+        .from('transcripts')
+        .select('*')
+        .eq('recording_id', recording.id)
+        .single();
+
+      if (transcriptError && transcriptError.code !== 'PGRST116') {
+        return reply.status(500).send({ error: transcriptError.message });
+      } else if (transcriptData) {
+        // Decrypt transcript text
+        if (transcriptData.encrypted_transcript_text) {
+          transcriptData.transcript_text = encryptionUtils.decryptText(
+            transcriptData.encrypted_transcript_text,
+            aes_key,
+            transcriptData.iv
+          );
+          delete transcriptData.encrypted_transcript_text;
+        }
+        transcript = transcriptData;
+      }
+    }
+
+    // Step 3: Fetch SOAP notes for encounter
+    const { data: soapNotes, error: soapError } = await supabase
+      .from('soapNotes')
+      .select('*')
+      .eq('patientEncounter_id', encounterId);
+
+    let notes = [];
+    if (soapError && soapError.code !== 'PGRST116') {
+      return reply.status(500).send({ error: soapError.message });
+    } else if (soapNotes && Array.isArray(soapNotes)) {
+      // Decrypt SOAP note texts
+      for (const note of soapNotes) {
+        if (note.encrypted_soapNote_text) {
+          note.soapNote_text = encryptionUtils.decryptText(
+            note.encrypted_soapNote_text,
+            aes_key,
+            note.iv
+          );
+          delete note.encrypted_soapNote_text;
+        }
+        notes.push(note);
+      }
+    }
+
+    // Return complete bundle
+    return reply.status(200).send({
+      patientEncounter: encounterData,
+      recording: recording || null,
+      transcript: transcript || null,
+      soapNotes: notes,
+    });
+  } catch (error) {
+    console.error('Error fetching complete patient encounter:', error);
+    return reply.status(500).send({ error: error.message });
+  }
+}
+
+/**
  * Create a complete patient encounter bundle
  * POST /api/patient-encounters/complete
  * 

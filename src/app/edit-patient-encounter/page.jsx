@@ -82,7 +82,7 @@ function EditPatientEncounterInner() {
     const fetchData = async () => {
       try {
         const response = await fetch(
-          `/api/patient-encounters/complete?id=${id}`,
+          `/api/patient-encounters/complete/${id}`,
           {
             headers: {
               Authorization: `Bearer ${api.getJWT()}`,

@@ -52,7 +52,7 @@ export default function DotPhrases() {
     if (confirm(`Are you sure you want to delete the dot phrase "${dotPhrase.trigger}"?`)) {
       const jwt = api.getJWT();
       try {
-        const response = await fetch(`/api/dotPhrases?id=${dotPhrase.id}`, {
+        const response = await fetch(`/api/dot-phrases/${dotPhrase.id}`, {
           method: "DELETE",
           headers: {
             Authorization: `Bearer ${jwt}`,
@@ -72,11 +72,13 @@ export default function DotPhrases() {
     const jwt = api.getJWT();
     try {
       const method = isCreatingNew ? "POST" : "PATCH";
-      const body = isCreatingNew 
-        ? { trigger: editValues.trigger, expansion: editValues.expansion }
-        : { id: selectedRowId, trigger: editValues.trigger, expansion: editValues.expansion };
+      const endpoint = isCreatingNew ? "/api/dot-phrases" : `/api/dot-phrases/${selectedRowId}`;
+      const body = {
+        trigger: editValues.trigger,
+        expansion: editValues.expansion,
+      };
 
-      const response = await fetch("/api/dotPhrases", {
+      const response = await fetch(endpoint, {
         method,
         headers: {
           Authorization: `Bearer ${jwt}`,

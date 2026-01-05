@@ -534,6 +534,47 @@ async function runPatientEncounterTests() {
           },
           expectedStatus: 400, // Invalid ID format
         });
+
+        // Test 21: Get complete patient encounter (with all linked data)
+        // PLACEHOLDER: Full SOAP notes functionality migration pending
+        if (createdEncounterId) {
+          await runner.test('Get complete patient encounter bundle (with all linked data)', {
+            method: 'GET',
+            endpoint: `/api/patient-encounters/complete/${createdEncounterId}`,
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            expectedStatus: 200,
+            expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNotes'],
+          });
+        }
+
+        // Test 22: Get complete patient encounter with invalid ID format
+        await runner.test('Get complete patient encounter (invalid ID format)', {
+          method: 'GET',
+          endpoint: '/api/patient-encounters/complete/invalid-id',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 400,
+        });
+
+        // Test 23: Get complete patient encounter with non-existent ID
+        await runner.test('Get complete patient encounter (non-existent)', {
+          method: 'GET',
+          endpoint: '/api/patient-encounters/complete/999999',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 404,
+        });
+
+        // Test 24: Get complete patient encounter without auth
+        await runner.test('Get complete patient encounter (no auth)', {
+          method: 'GET',
+          endpoint: '/api/patient-encounters/complete/test-id',
+          expectedStatus: 401,
+        });
       }
     }
   } else {

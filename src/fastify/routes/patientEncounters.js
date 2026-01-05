@@ -9,6 +9,7 @@ import {
   updatePatientEncounter,
   deletePatientEncounter,
   batchPatientEncounters,
+  getCompletePatientEncounter,
   completePatientEncounter,
 } from '../controllers/patientEncountersController.js';
 
@@ -57,6 +58,13 @@ export async function registerPatientEncountersRoutes(fastify) {
   fastify.post('/patient-encounters/batch', {
     preHandler: [fastify.authenticate],
     handler: batchPatientEncounters,
+  });
+
+  // GET /patient-encounters/complete/:id
+  // Get a complete patient encounter bundle with all linked data (recording, transcript, SOAP notes)
+  fastify.get('/patient-encounters/complete/:id', {
+    preHandler: [fastify.authenticate],
+    handler: getCompletePatientEncounter,
   });
 
   // POST /patient-encounters/complete

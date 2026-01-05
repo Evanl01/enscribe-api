@@ -111,7 +111,7 @@ export default function ViewRecordings() {
     try {
       if (recording.id) {
         // Attached recording - fetch from API with signed URL generation
-        const response = await fetch(`/api/recordings?id=${recording.id}`, {
+        const response = await fetch(`/api/recordings/${recording.id}`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${jwt}`,
