@@ -23,6 +23,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const RECORDINGS_BUCKET = 'audio-files';
 const FIXTURES_DIR = path.resolve(__dirname, 'fixtures');
+const FIXTURES_README = path.resolve(__dirname, 'fixtures/README.txt');
 const TEST_DATA_FILE = path.resolve(__dirname, 'testData.json');
 
 /**
@@ -37,6 +38,14 @@ const TEST_DATA_SCHEMA = [
   { fileIndex: 2, shouldBeAttached: true, encounterId: 902 },
   { fileIndex: 3, shouldBeAttached: false, encounterId: null },
   { fileIndex: 4, shouldBeAttached: false, encounterId: null },
+];
+
+/**
+ * Default dotPhrases if fixture file not readable
+ */
+const DEFAULT_DOTPHRASES = [
+  { trigger: 'pt', expansion: 'patient' },
+  { trigger: 'hx', expansion: 'history' },
 ];
 
 /**
@@ -85,6 +94,57 @@ function getFixtureFiles() {
   } catch (error) {
     console.error(`Error reading fixtures directory: ${error.message}`);
     return [];
+  }
+}
+
+/**
+ * Parse dotPhrase fixtures from README.txt
+ * Returns array of { trigger, expansion } objects
+ */
+function readDotPhraseFixtures() {
+  try {
+    const content = fs.readFileSync(FIXTURES_README, 'utf-8');
+    const dotPhrases = [];
+    const lines = content.split('\n');
+    let inDotPhrasesSection = false;
+    let currentPhrase = {};
+    
+    for (const line of lines) {
+      // Start of dotPhrases section
+      if (line.includes('DOTPHRASES TO ADD')) {
+        inDotPhrasesSection = true;
+        continue;
+      }
+      
+      // End of section (HOW IT WORKS or next section)
+      if (inDotPhrasesSection && (line.includes('HOW IT WORKS') || line.includes('CREATED DOTPHRASES'))) {
+        inDotPhrasesSection = false;
+      }
+      
+      // Parse dotPhrase lines
+      if (inDotPhrasesSection) {
+        const triggerMatch = line.match(/TRIGGER\s*=\s*(\S+)/);
+        const expansionMatch = line.match(/EXPANSION\s*=\s*(.+)/);
+        
+        if (triggerMatch) {
+          currentPhrase.trigger = triggerMatch[1].trim();
+        }
+        if (expansionMatch) {
+          currentPhrase.expansion = expansionMatch[1].trim();
+        }
+        
+        // If we have both, add to array and reset
+        if (currentPhrase.trigger && currentPhrase.expansion) {
+          dotPhrases.push(currentPhrase);
+          currentPhrase = {};
+        }
+      }
+    }
+    
+    return dotPhrases.length > 0 ? dotPhrases : DEFAULT_DOTPHRASES;
+  } catch (error) {
+    console.warn(`Could not read dotPhrase fixtures (${error.message}), using defaults`);
+    return DEFAULT_DOTPHRASES;
   }
 }
 
@@ -321,7 +381,103 @@ async function setupTestData() {
 
     // Check if setup already complete (3 attached + 2 unattached)
     if (matchedAttached.length >= 3 && unmatchedUnattached.length >= 2) {
-      console.log('✓ Complete test data already exists. Skipping setup.\n');
+      console.log('✓ Complete test data already exists. Skipping recording setup.\n');
+      
+      // Reconcile dotPhrases: check existing, delete mismatched, create missing
+      console.log('⚙️ Reconciling test dotPhrases...');
+      const expectedDotPhrases = readDotPhraseFixtures();
+      const createdDotPhrases = [];
+      
+      // Fetch existing dotPhrases for the user
+      let existingDotPhrases = [];
+      try {
+        const getResponse = await fetch('http://localhost:3001/api/dotphrases', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (getResponse.ok) {
+          const data = await getResponse.json();
+          existingDotPhrases = Array.isArray(data) ? data : (data.data || []);
+        }
+      } catch (error) {
+        console.warn(`  ⚠️  Error fetching existing dotPhrases: ${error.message}`);
+      }
+      
+      // Build map of expected dotPhrases by trigger
+      const expectedMap = new Map(expectedDotPhrases.map(dp => [dp.trigger, dp.expansion]));
+      
+      // Delete dotPhrases that don't match or aren't expected
+      for (const existing of existingDotPhrases) {
+        const expectedExpansion = expectedMap.get(existing.trigger);
+        
+        // If not in expected list or expansion doesn't match, delete it
+        if (!expectedExpansion || expectedExpansion !== existing.expansion) {
+          try {
+            const deleteResponse = await fetch(`http://localhost:3001/api/dotphrases/${existing.id}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+              },
+            });
+            
+            if (deleteResponse.ok) {
+              console.log(`  🗑️  Deleted mismatched dotPhrase: "${existing.trigger}"`);
+            }
+          } catch (error) {
+            console.warn(`  ⚠️  Error deleting dotPhrase "${existing.trigger}": ${error.message}`);
+          }
+        }
+      }
+      
+      // Create or skip dotPhrases based on expected list
+      for (const phrase of expectedDotPhrases) {
+        const existing = existingDotPhrases.find(dp => dp.trigger === phrase.trigger);
+        
+        if (existing && existing.expansion === phrase.expansion) {
+          // Already exists with correct expansion
+          console.log(`  ⏭️  Skipping dotPhrase: "${phrase.trigger}" (already exists)`);
+          createdDotPhrases.push({
+            id: existing.id,
+            trigger: phrase.trigger,
+            expansion: phrase.expansion,
+          });
+        } else {
+          // Create new or update
+          try {
+            const response = await fetch('http://localhost:3001/api/dotphrases', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                trigger: phrase.trigger,
+                expansion: phrase.expansion,
+              }),
+            });
+            
+            if (response.ok) {
+              const created = await response.json();
+              const dotPhraseId = created.id || created.data?.id || created.data?.dotPhrase?.id;
+              createdDotPhrases.push({
+                id: dotPhraseId,
+                trigger: phrase.trigger,
+                expansion: phrase.expansion,
+              });
+              console.log(`  ✓ Created dotPhrase: "${phrase.trigger}" → "${phrase.expansion}"`);
+            } else {
+              console.warn(`  ⚠️  Failed to create dotPhrase "${phrase.trigger}": ${response.status}`);
+            }
+          } catch (error) {
+            console.warn(`  ⚠️  Error creating dotPhrase "${phrase.trigger}": ${error.message}`);
+          }
+        }
+      }
+      console.log();
       
       // Get encounters for test data
       const encounters = [];
@@ -383,10 +539,11 @@ async function setupTestData() {
           displayId: 900 + i,
         })),
         recordings: recordingsWithIds,
+        dotPhrases: createdDotPhrases,
       };
 
       fs.writeFileSync(TEST_DATA_FILE, JSON.stringify(testData, null, 2));
-      console.log('✓ testData.json loaded from existing data\n');
+      console.log('✓ testData.json updated with dotPhrases\n');
 
       console.log('='.repeat(70));
       console.log('EXISTING TEST DATA');
@@ -638,6 +795,43 @@ async function setupTestData() {
       }
     }
 
+    // Step N: Create test dotPhrases
+    console.log('Creating test dotPhrases...');
+    const dotPhrasesToCreate = readDotPhraseFixtures();
+    const createdDotPhrases = [];
+    
+    for (const phrase of dotPhrasesToCreate) {
+      try {
+        const response = await fetch('http://localhost:3001/api/dotphrases', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            trigger: phrase.trigger,
+            expansion: phrase.expansion,
+          }),
+        });
+        
+        if (response.ok) {
+          const created = await response.json();
+          const dotPhraseId = created.id || created.data?.id || created.data?.dotPhrase?.id;
+          createdDotPhrases.push({
+            id: dotPhraseId,
+            trigger: phrase.trigger,
+            expansion: phrase.expansion,
+          });
+          console.log(`  ✓ Created dotPhrase: "${phrase.trigger}" → "${phrase.expansion}"`);
+        } else {
+          console.warn(`  ⚠️  Failed to create dotPhrase "${phrase.trigger}": ${response.status}`);
+        }
+      } catch (error) {
+        console.warn(`  ⚠️  Error creating dotPhrase "${phrase.trigger}": ${error.message}`);
+      }
+    }
+    console.log();
+
     const testData = {
       createdAt: new Date().toISOString(),
       testAccount: {
@@ -650,6 +844,7 @@ async function setupTestData() {
         displayId: 900 + i,
       })),
       recordings: allRecordings,
+      dotPhrases: createdDotPhrases,
     };
 
     fs.writeFileSync(TEST_DATA_FILE, JSON.stringify(testData, null, 2));

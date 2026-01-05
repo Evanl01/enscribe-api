@@ -9,8 +9,9 @@ A comprehensive testing system with permanent storage, historical tracking, and 
 | **Authentication** | 14 | Sign-up, Sign-in, Validity, Resend, Logout | 85.71% | ✅ |
 | **Dot Phrases** | 10 | CRUD + Auth enforcement | 90.00% | ✅ |
 | **Recordings** | 24 | Attachments (17) + CRUD (7) | TBD | ✅ |
-| **Transcripts** | 20 | CRUD (18) + Immutability (2) | TBD | ✅ New |
-| **Total** | **68** | **Complete CRUD across 4 APIs** | **TBD** | **In Testing** |
+| **Transcripts** | 20 | CRUD (18) + Immutability (2) | TBD | ✅ |
+| **GCP Transcription** | 9 | Transcribe (1), Expansion (4), Error Handling (4) | In Testing | 🆕 |
+| **Total** | **77** | **Complete CRUD + transcription pipeline** | **TBD** | **In Testing** |
 
 ## 📁 Files Organization
 
@@ -19,7 +20,8 @@ A comprehensive testing system with permanent storage, historical tracking, and 
 - `tests/auth.test.js` - 14 authentication tests
 - `tests/dotphrases.test.js` - 10 dot phrases tests
 - `tests/recordings.test.js` - 24 recordings tests
-- `tests/transcripts.test.js` - 20 transcripts tests (NEW)
+- `tests/transcripts.test.js` - 20 transcripts tests
+- `tests/gcp.test.js` - 9 GCP transcription tests (NEW)
 - `tests/setup.test.js` - Recordings test data setup (updated)
 - `tests/runAll.js` - Master test runner
 - `tests/README.md` - Detailed testing guide
@@ -48,6 +50,7 @@ npm run test:auth          # Auth API (14 tests)
 npm run test:dotphrases    # Dot Phrases API (10 tests)
 npm run test:recordings    # Recordings API (24 tests)
 npm run test:transcripts   # Transcripts API (20 tests)
+npm run test:gcp           # GCP Transcription API (9 tests) - NEW
 ```
 
 #### Run Recordings Tests by Category
@@ -75,6 +78,9 @@ jq '.results' test-results/dotphrases-tests.json
 
 # Recordings test results
 jq '.results' test-results/recordings-tests.json
+
+# GCP test results
+jq '.results' test-results/gcp-tests.json
 
 # Check specific pass rate
 jq '.summary.passRate' test-results/auth-tests.json
@@ -279,6 +285,8 @@ npm test
 npm run test:auth
 npm run test:dotphrases
 npm run test:recordings
+npm run test:transcripts
+npm run test:gcp              # NEW
 
 # Run recordings tests by category
 node tests/recordings.test.js --all          # All 24 tests
@@ -287,7 +295,7 @@ node tests/recordings.test.js --crud         # 7 tests
 
 # View results
 cat test-results/consolidated-report.json | jq .
-cat test-results/recordings-tests.json | jq '.results | .[] | {name, passed, status}'
+cat test-results/gcp-tests.json | jq '.results | .[] | {name, passed, status}'
 
 # Check pass rate trend
 for f in test-results/auth-tests-*.json; do
@@ -295,12 +303,82 @@ for f in test-results/auth-tests-*.json; do
 done
 ```
 
+## GCP Transcription API Tests (9 Tests)
+
+### Test Categories
+
+#### Cloud Transcription Tests (3 tests)
+- **Test 1**: Transcribe with valid signed URL
+  - Tests real Cloud Run integration
+  - Validates transcript extraction
+  - Checks response structure (cloudRunData)
+  - Expected: 200 OK with transcript content
+
+- **Test 2**: Reject transcribe without authentication
+  - Tests authorization enforcement
+  - Expected: 401 Unauthorized
+
+- **Test 3**: Handle invalid signed URL gracefully
+  - Tests error handling for expired/invalid URLs
+  - Expected: 400 Bad Request with error message
+
+#### Dot Phrase Expansion Tests (4 tests) - NEW /api/gcp/expand Endpoint
+- **Test 4**: Expand dot phrases in transcription
+  - Tests expansion of "pt" and "pts" triggers
+  - Validates both `expanded` and `llm_notated` outputs
+  - Checks for prefix markers on dot phrase expansions
+  - Expected: 200 OK with both outputs containing expansions
+
+- **Test 5**: Handle recordings with no dot phrase triggers
+  - Tests graceful handling when no triggers match
+  - Validates transcript remains unchanged
+  - Expected: 200 OK with unchanged expanded/llm_notated
+
+- **Test 6**: De-duplicate overlapping dot phrase matches
+  - Tests longest-match priority (e.g., "pts" before "pt")
+  - Validates both triggers expand correctly in same text
+  - Expected: 200 OK with both expansions applied
+
+- **Test 9**: Skip dot phrase expansion when disabled
+  - Tests `enableDotPhraseExpansion: false` flag
+  - Validates transcript remains unchanged
+  - Expected: 200 OK with unchanged outputs
+
+#### Error Handling Tests (2 tests)
+- **Test 7**: Missing required body field
+  - Tests validation of `recording_file_signed_url`
+  - Expected: 400 Bad Request with error message
+
+- **Test 8**: Malformed signed URL
+  - Tests detection of invalid URL format (not starting with http/https)
+  - Expected: 400 Bad Request before Cloud Run attempt
+
+### Expansion Logic (January 2026 Update)
+
+**Trigger Version Building**:
+1. Original trigger (lowercase)
+2. No punctuation (except apostrophes)
+3. Contractions expanded ("don't" → "do not")
+4. Abbreviations expanded ("pt" → "patient")
+
+**Prefix Application**:
+- **Explicit dot phrase triggers**: Get emphasis prefix
+  - `{(This is the doctor's autofilled dotPhrase, place extra emphasis...)(end dotPhrase)}`
+- **Auto-expansions** (contractions/abbreviations): No prefix to reduce clutter
+
+**Match Resolution**:
+- Longer matches prioritized over shorter ones
+- Word boundary validation ensures whole-word matching only
+- All overlapping matches removed before output
+
 ## ✅ Implementation Checklist
 
 - [x] Test framework (TestRunner class)
 - [x] Auth API tests (14 tests)
 - [x] Dot Phrases tests (10 tests)
 - [x] Recordings tests (24 tests - 17 attachments + 7 CRUD)
+- [x] Transcripts tests (20 tests)
+- [x] GCP Transcription tests (9 tests) - NEW
 - [x] Real audio file fixtures
 - [x] Test data persistence (testData.json)
 - [x] Results storage with timestamps
@@ -312,11 +390,12 @@ done
 
 ## 🎉 Summary
 
-**Production-ready testing system with 68 total test cases:**
+**Production-ready testing system with 77 total test cases:**
 - ✅ **Authentication API** (14 tests)
 - ✅ **Dot Phrases API** (10 tests)  
 - ✅ **Recordings API** (24 tests with real audio files)
 - ✅ **Transcripts API** (20 tests with encryption & immutability)
+- ✅ **GCP Transcription API** (9 tests with expansion logic) - NEW
 - ✅ Permanent storage with historical tracking
 - ✅ Easy to extend with template-based approach
 - ✅ Deep validation (encryption, batch processing, RLS)
@@ -327,6 +406,6 @@ All test cases and results are stored permanently. The system is production-read
 ---
 
 **Created**: 2025-12-22  
-**Last Updated**: 2026-01-01  
+**Last Updated**: 2026-01-02  
 **Status**: ✅ Complete and Functional  
 **Next**: Add tests for Patient Encounters, SOAP Notes, etc.

@@ -56,13 +56,13 @@ export class TestRunner {
    * Add a test case
    */
   async test(name, config) {
-    const { method, endpoint, body, headers, expectedStatus, expectedFields } = config;
+    const { method, endpoint, body, headers, expectedStatus, expectedFields, customValidator } = config;
 
     const url = `${this.baseUrl}${endpoint}`;
     const response = await makeRequest(method, url, { body, headers, expectedStatus });
 
-    const passed =
-      response.passed &&
+    // Check status and expected fields
+    let passed = response.passed &&
       (!expectedFields ||
         expectedFields.every((field) => {
           const keys = field.split('.');
@@ -73,6 +73,17 @@ export class TestRunner {
           return value !== undefined && value !== null;
         }));
 
+    // Apply custom validator if provided (always call it to get message even on failure)
+    let customMessage = '';
+    if (customValidator) {
+      const validationResult = customValidator(response.body);
+      if (passed) {
+        // Only update passed status if test already passed
+        passed = passed && validationResult.passed;
+      }
+      customMessage = validationResult.message || '';
+    }
+
     const result = {
       name,
       passed,
@@ -81,6 +92,7 @@ export class TestRunner {
       status: response.status,
       expectedStatus,
       body: response.body,
+      customMessage,
       timestamp: new Date().toISOString(),
     };
 
@@ -146,6 +158,10 @@ export class TestRunner {
     this.results.forEach((result, index) => {
       const status = result.passed ? '✅' : '❌';
       console.log(`${status} Test ${index + 1}: ${result.name}`);
+      
+      if (result.customMessage) {
+        console.log(`   ${result.customMessage}`);
+      }
       
       const responseBody = result.body || result.fullResponse || {};
       const responseStr = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);

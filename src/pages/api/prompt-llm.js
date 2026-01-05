@@ -6,7 +6,7 @@ import { recordingSchema } from '@/src/app/schemas';
 import * as geminiRequestBodies from '@/src/utils/geminiRequestBodies'; // Adjust the import path as needed
 import * as gptRequestBodies from '@/src/utils/gptRequestBodies'; // Adjust the import path as needed
 import * as transcribe_complete from '@/src/pages/api/gcp/transcribe/complete';
-import { unmask_phi } from '@/src/pages/api/aws/mask-phi';
+import { unmask_phi } from '@/src/utils/maskPhiHelper';
 import { sendApiError, sendSseError } from '@/src/utils/apiErrorResponse';
 import ca from 'zod/v4/locales/ca.cjs';
 import tr from 'zod/v4/locales/tr.cjs';

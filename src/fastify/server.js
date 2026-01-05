@@ -16,6 +16,8 @@ import dotPhrasesRoutes from './routes/dotPhrases.js';
 import patientEncountersRoutes from './routes/patientEncounters.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerTranscriptsRoutes } from './routes/transcripts.js';
+import { registerMaskPhiRoutes } from './routes/maskPhi.routes.js';
+import { registerTranscribeRoutes } from './routes/transcribe.routes.js';
 
 /**
  * Create and configure Fastify application
@@ -75,8 +77,10 @@ async function createFastifyApp(options = {}) {
     await apiScope.register(authRoutes);
     await apiScope.register(dotPhrasesRoutes);
     await apiScope.register(patientEncountersRoutes);
-    await apiScope.register(registerRecordingsRoutes);
-    await apiScope.register(registerTranscriptsRoutes);
+    await registerRecordingsRoutes(apiScope);
+    await registerTranscriptsRoutes(apiScope);
+    await registerMaskPhiRoutes(apiScope);
+    await registerTranscribeRoutes(apiScope);
   }, { prefix: '/api' });
 
   // Health check route (no auth required)

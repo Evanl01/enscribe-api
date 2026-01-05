@@ -9,6 +9,8 @@ import { runDotPhrasesTests } from './dotphrases.test.js';
 import { runPatientEncounterTests } from './patient-encounters.test.js';
 import { runRecordingsTests } from './recordings.test.js';
 import { runTranscriptsTests } from './transcripts.test.js';
+import { runAwsTests } from './aws.test.js';
+import { runGcpTests } from './gcp.test.js';
 
 /**
  * Run all test suites
@@ -32,10 +34,29 @@ async function runAllTests() {
     process.exit(1);
   }
 
+  // Run AWS Tests
+  try {
+    console.log('\n' + '-'.repeat(70));
+    console.log('TEST SUITE 1: AWS PHI MASKING API');
+    console.log('-'.repeat(70) + '\n');
+    const awsResult = await runAwsTests();
+    results.push({ 
+      suite: 'AWS PHI Masking', 
+      status: 'completed',
+      tests: awsResult?.total || 0,
+      passed: awsResult?.passed || 0,
+      failed: awsResult?.failed || 0,
+      passRate: awsResult?.passRate || '0%'
+    });
+  } catch (error) {
+    console.error('❌ AWS tests failed:', error.message);
+    results.push({ suite: 'AWS PHI Masking', status: 'failed', error: error.message });
+  }
+
   // Run Auth Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 1: AUTHENTICATION API');
+    console.log('TEST SUITE 2: AUTHENTICATION API');
     console.log('-'.repeat(70) + '\n');
     const authResult = await runAuthTests();
     results.push({ 
@@ -54,7 +75,7 @@ async function runAllTests() {
   // Run Dot Phrases Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 2: DOT PHRASES API');
+    console.log('TEST SUITE 3: DOT PHRASES API');
     console.log('-'.repeat(70) + '\n');
     const dotPhrasesResult = await runDotPhrasesTests();
     results.push({ 
@@ -73,7 +94,7 @@ async function runAllTests() {
   // Run Patient Encounters Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 3: PATIENT ENCOUNTERS API');
+    console.log('TEST SUITE 4: PATIENT ENCOUNTERS API');
     console.log('-'.repeat(70) + '\n');
     const peResult = await runPatientEncounterTests();
     results.push({ 
@@ -92,7 +113,7 @@ async function runAllTests() {
   // Run Recordings Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 4: RECORDINGS API');
+    console.log('TEST SUITE 5: RECORDINGS API');
     console.log('-'.repeat(70) + '\n');
     const recResult = await runRecordingsTests();
     results.push({ 
@@ -111,7 +132,7 @@ async function runAllTests() {
   // Run Transcripts Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 5: TRANSCRIPTS API');
+    console.log('TEST SUITE 6: TRANSCRIPTS API');
     console.log('-'.repeat(70) + '\n');
     const transResult = await runTranscriptsTests();
     results.push({ 
@@ -125,6 +146,25 @@ async function runAllTests() {
   } catch (error) {
     console.error('❌ Transcripts tests failed:', error.message);
     results.push({ suite: 'Transcripts', status: 'failed', error: error.message });
+  }
+
+  // Run GCP Tests
+  try {
+    console.log('\n' + '-'.repeat(70));
+    console.log('TEST SUITE 7: GCP TRANSCRIPTION PIPELINE');
+    console.log('-'.repeat(70) + '\n');
+    const gcpResult = await runGcpTests();
+    results.push({ 
+      suite: 'GCP Transcription', 
+      status: 'completed',
+      tests: gcpResult?.total || 0,
+      passed: gcpResult?.passed || 0,
+      failed: gcpResult?.failed || 0,
+      passRate: gcpResult?.passRate || '0%'
+    });
+  } catch (error) {
+    console.error('❌ GCP tests failed:', error.message);
+    results.push({ suite: 'GCP Transcription', status: 'failed', error: error.message });
   }
 
   // Generate consolidated report

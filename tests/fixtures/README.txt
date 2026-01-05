@@ -34,3 +34,36 @@ UPLOADED FILE PATHS (Auto-populated after setup):
 - loohsienrong@gmail.com-1759263800995-09.mp3 → [Check testData.json after setup]
 
 For actual paths, see: ../testData.json (created after npm run test:setup)
+
+
+Test DotPhrases Placeholder
+============================
+
+These trigger-expansion pairs are used by the GCP transcription tests to verify
+dot phrase expansion works correctly.
+
+DOTPHRASES TO ADD:
+
+dotPhrase 1:
+  TRIGGER=pt
+  EXPANSION=patient
+
+dotPhrase 2:
+  TRIGGER=pts
+  EXPANSION=parts
+
+HOW IT WORKS:
+1. Add trigger/expansion pairs to this section above
+2. Run: npm run test:setup
+3. The setup script will:
+   - Read these dotPhrases from this file
+   - Create them via the API endpoint
+   - Save metadata to tests/testData.json
+4. Run GCP tests: npm run test:gcp
+5. Tests will read from testData.json and verify expansion works
+
+CREATED DOTPHRASES (Auto-populated after setup):
+- pt → patient [Check testData.json after setup]
+- pts → parts [Check testData.json after setup]
+
+For actual paths, see: ../testData.json (created after npm run test:setup)

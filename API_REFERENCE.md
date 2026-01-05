@@ -7,6 +7,7 @@ Complete API documentation for frontend developers integrating with the Enscribe
 - [Authentication API](#authentication-api)
 - [Patient Encounters API](#patient-encounters-api)
 - [Dot Phrases API](#dot-phrases-api)
+- [GCP Transcription API](#gcp-transcription-api)
 - [Status Codes Reference](#status-codes-reference)
 - [Error Handling](#error-handling)
 
@@ -1054,7 +1055,235 @@ export function PatientEncounterForm({ accessToken }) {
 
 ---
 
-## Frequently Asked Questions
+## GCP Transcription API
+
+### Overview
+
+The GCP Transcription API handles audio transcription via Google Cloud Run, dot phrase expansion, and PHI masking. These endpoints require authentication and handle the complete transcription pipeline.
+
+### Endpoints
+
+#### 1. Complete Transcription Pipeline
+**POST** `/api/gcp/transcribe/complete`
+
+Transcribe audio, expand dot phrases, and mask PHI in a single request.
+
+**Request:**
+```json
+{
+  "recording_file_signed_url": "https://storage.googleapis.com/..."
+}
+```
+
+**Field Validation:**
+- `recording_file_signed_url` (required): Valid HTTPS URL to audio file (must start with http:// or https://)
+
+**Response (200 OK):**
+```json
+{
+  "ok": true,
+  "cloudRunData": {
+    "transcript": "The patient presented with hypertension symptoms...",
+    "expanded": "The patient presented with {hypertensive disease} symptoms...",
+    "llm_notated": "The patient presented with {(This is the doctor's autofilled dotPhrase, place extra emphasis on this section of the transcript) hypertensive disease(end dotPhrase)} symptoms...",
+    "masked": "The [PATIENT] presented with hypertension symptoms..."
+  }
+}
+```
+
+**Status Codes:**
+- `200 OK` - Transcription successful
+- `400 Bad Request` - Malformed URL or invalid signed URL format
+- `401 Unauthorized` - Missing or invalid authentication token
+- `500 Internal Server Error` - Cloud Run transcription failed
+
+**Example (JavaScript):**
+```javascript
+const { data } = await supabase.storage
+  .from('audio-files')
+  .createSignedUrl(recordingPath, 3600); // 1 hour expiry
+
+const response = await fetch('/api/gcp/transcribe/complete', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: JSON.stringify({
+    recording_file_signed_url: data.signedUrl
+  })
+});
+
+if (response.ok) {
+  const { cloudRunData } = await response.json();
+  console.log('Transcript:', cloudRunData.transcript);
+  console.log('Expanded:', cloudRunData.expanded);
+  console.log('Masked:', cloudRunData.masked);
+}
+```
+
+**Notes:**
+- The URL must be a valid signed URL from Supabase storage
+- Signed URLs expire after the specified duration (typically 1 hour)
+- Cloud Run transcription can take 30-60 seconds depending on audio length
+- Dot phrases are automatically expanded if configured
+- PHI masking is applied to all outputs
+
+---
+
+#### 2. Dot Phrase Expansion Only
+**POST** `/api/gcp/expand`
+
+Expand dot phrases in text without calling Cloud Run. Useful for testing expansion logic or expanding already-transcribed text.
+
+**Request:**
+```json
+{
+  "transcript": "The pt presented with htn symptoms. Multiple pts were waiting.",
+  "dotPhrases": [
+    {
+      "id": "uuid",
+      "trigger": "pt",
+      "expansion": "patient"
+    },
+    {
+      "id": "uuid",
+      "trigger": "htn",
+      "expansion": "hypertension"
+    }
+  ],
+  "enableDotPhraseExpansion": true
+}
+```
+
+**Field Validation:**
+- `transcript` (required): String containing text to expand
+- `dotPhrases` (required): Array of objects with trigger and expansion properties
+- `enableDotPhraseExpansion` (required): Boolean to enable/disable expansion
+
+**Response (200 OK):**
+```json
+{
+  "ok": true,
+  "expanded": "The patient presented with hypertension symptoms. Multiple patients were waiting.",
+  "llm_notated": "The {(This is the doctor's autofilled dotPhrase, place extra emphasis on this section of the transcript) patient(end dotPhrase)} presented with hypertension symptoms. Multiple {(This is the doctor's autofilled dotPhrase, place extra emphasis on this section of the transcript) patients(end dotPhrase)} were waiting."
+}
+```
+
+**Status Codes:**
+- `200 OK` - Expansion successful (even if no triggers found)
+- `400 Bad Request` - Missing required fields or invalid input
+- `401 Unauthorized` - Missing or invalid authentication token
+
+**Expansion Behavior:**
+
+The expansion logic uses the Aho-Corasick algorithm to efficiently match multiple triggers:
+
+1. **Original Trigger Matching**: Matches exact trigger as defined
+2. **Punctuation Normalization**: Removes punctuation (except apostrophes) for matching
+3. **Contraction Expansion**: Matches contracted forms ("don't" → "do not")
+4. **Abbreviation Expansion**: Matches expanded abbreviations ("pt" → "patient")
+5. **Prefix Notation**: 
+   - **Explicit dot phrase triggers** get the emphasis prefix: `{(This is the doctor's autofilled dotPhrase, place extra emphasis...)(end dotPhrase)}`
+   - **Auto-expansions** (from contractions/abbreviations) do NOT get the prefix to avoid clutter
+
+6. **Overlap Resolution**: Longer matches take priority (e.g., "pts" expands before "pt")
+
+**Example (JavaScript):**
+```javascript
+const response = await fetch('/api/gcp/expand', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: JSON.stringify({
+    transcript: "The pt has htn and presented to the clinic.",
+    dotPhrases: [
+      { id: '1', trigger: 'pt', expansion: 'patient' },
+      { id: '2', trigger: 'htn', expansion: 'hypertension' }
+    ],
+    enableDotPhraseExpansion: true
+  })
+});
+
+if (response.ok) {
+  const { expanded, llm_notated } = await response.json();
+  console.log('Expanded:', expanded);
+  console.log('For LLM:', llm_notated);
+}
+```
+
+---
+
+## Recent Changes (December 2025 - January 2026)
+
+### Expansion Logic Improvements
+
+**Issue**: Automatic abbreviation expansion (e.g., "pt" → "patient") was adding the emphasis prefix to all matches, making output cluttered.
+
+**Solution**: Implemented distinction between explicit dot phrase triggers and auto-expansions:
+- Explicit dot phrase triggers (user-defined): Get the full emphasis prefix
+- Auto-expansions (contractions/abbreviations): Get clean expansion without prefix
+
+**Implementation Details**:
+- Modified `buildTriggerVersions()` in `transcribeController.js` to track which trigger versions are auto-expanded
+- Updated `expandDotPhrases()` to conditionally apply prefix based on `isAutoExpanded` flag
+- Updated `findAllMatches()` to propagate the flag through the matching process
+
+**Files Modified**:
+- `src/fastify/controllers/transcribeController.js`:
+  - `buildTriggerVersions()`: Now returns Map with `{ originalTrigger, expansion, isAutoExpanded }`
+  - `expandDotPhrases()`: Conditionally applies prefix only for non-auto-expanded matches
+  - `findAllMatches()`: Includes `isAutoExpanded` in match objects
+
+### URL Validation for Malformed URLs
+
+**Issue**: Malformed signed URLs (e.g., "not-a-valid-url") were returning 500 instead of 400.
+
+**Solution**: Added format validation before attempting HEAD request in transcribeHelper.js
+
+**Files Modified**:
+- `src/utils/transcribeHelper.js`: Added validation to check if URL starts with http:// or https://
+
+### New Endpoint: /api/gcp/expand
+
+**Purpose**: Unit test expansion logic without Cloud Run latency
+
+**Implementation**:
+- Created `expandHandler()` in `transcribeController.js`
+- Handles `/api/gcp/expand` route with hardcoded test transcripts
+- Accepts `transcript`, `dotPhrases`, and `enableDotPhraseExpansion` parameters
+- Returns both `expanded` and `llm_notated` versions
+
+**Files Modified**:
+- `src/fastify/controllers/transcribeController.js`: Added `expandHandler()` function
+- `src/fastify/routes/transcribe.routes.js`: Added `/expand` POST endpoint
+
+### Architecture Migration: Next.js pages/api → Fastify Backend
+
+**Major Structural Changes**:
+- **Route File Structure**: Changed from nested `pages/api/gcp/transcribe/complete.js` to centralized `routes/transcribe.routes.js`
+- **Request Authentication**: Now uses Fastify's `onRequest: [fastify.authenticate]` middleware instead of manual authentication
+- **Route Registration**: Routes are registered as Fastify plugins with `/api` prefix applied by server.js
+- **Error Handling**: Fastify global error handler replaces individual error handling logic
+- **Request/Response**: Uses Fastify request/reply objects instead of Next.js req/res
+
+**For Frontend Developers**:
+The endpoint URLs remain the same (`/api/gcp/transcribe/complete`, `/api/gcp/expand`), but the authentication flow works through Fastify's authentication decorator which validates the `Authorization: Bearer <token>` header automatically.
+
+**Route Changes Summary**:
+
+| Aspect | pages/api (Next.js) | Fastify | Notes |
+|--------|-------------------|---------|-------|
+| **Route File** | `src/pages/api/gcp/transcribe/complete.js` | `src/fastify/routes/transcribe.routes.js` | Centralized routes file |
+| **Authentication** | Manual `authenticateRequest()` calls | `onRequest: [fastify.authenticate]` | Middleware-based auth |
+| **Response Format** | Direct `return { ... }` | `reply.status().send()` | Fastify reply pattern |
+| **Error Handling** | Individual try-catch in handler | Global error handler + reply.status() | Centralized error handling |
+| **Prefix Handling** | Always applied to expansions | Conditional based on `isAutoExpanded` | Cleaner output for auto-expansions |
+| **Request Handler** | Standalone function | Plugin-based registration | Better Fastify integration |
+
+---
 
 ### Q: How do I refresh an expired token?
 **A:** The Supabase client handles this automatically. If your token expires, use the refresh token to get a new one. See your authentication documentation for details.
