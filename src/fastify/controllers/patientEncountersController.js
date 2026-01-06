@@ -36,7 +36,7 @@ export async function getAllPatientEncounters(request, reply) {
       return reply.status(500).send({ error: error.message });
     }
 
-    // Decrypt sensitive fields
+    // Decrypt sensitive fields and remove encryption keys
     for (let encounter of data) {
       if (!encounter.encrypted_aes_key || !encounter.iv) {
         console.error(`Missing encryption keys for encounter ${encounter.id}`);
@@ -52,6 +52,10 @@ export async function getAllPatientEncounters(request, reply) {
         );
         delete encounter.encrypted_name;
       }
+      
+      // Remove encryption fields from response (not relevant to frontend)
+      delete encounter.encrypted_aes_key;
+      delete encounter.iv;
     }
 
     return reply.status(200).send(data);
@@ -94,7 +98,7 @@ export async function getPatientEncounter(request, reply) {
       return reply.status(500).send({ error: error.message });
     }
 
-    // Decrypt sensitive fields
+    // Decrypt sensitive fields and remove encryption keys
     if (encounter.encrypted_aes_key && encounter.iv && encounter.encrypted_name) {
       const aes_key = encryptionUtils.decryptAESKey(encounter.encrypted_aes_key);
       encounter.name = encryptionUtils.decryptText(
@@ -104,6 +108,10 @@ export async function getPatientEncounter(request, reply) {
       );
       delete encounter.encrypted_name;
     }
+    
+    // Remove encryption fields from response (not relevant to frontend)
+    delete encounter.encrypted_aes_key;
+    delete encounter.iv;
 
     return reply.status(200).send(encounter);
   } catch (error) {
@@ -324,94 +332,6 @@ export async function deletePatientEncounter(request, reply) {
 }
 
 /**
- * Batch operations on patient encounters
- * POST /api/patient-encounters/batch
- */
-export async function batchPatientEncounters(request, reply) {
-  try {
-    const supabase = getSupabaseClient(request.headers.authorization);
-    const user = request.user;
-
-    if (!user) {
-      return reply.status(401).send({ error: 'Unauthorized' });
-    }
-
-    const { action, ids } = request.body;
-
-    // Validate request
-    if (!action || !ids || !Array.isArray(ids)) {
-      return reply.status(400).send({ error: 'action and ids (array) are required' });
-    }
-
-    if (ids.length === 0) {
-      return reply.status(400).send({ error: 'ids array cannot be empty' });
-    }
-
-    const validActions = ['delete', 'archive', 'update'];
-    if (!validActions.includes(action)) {
-      return reply.status(400).send({ error: `action must be one of: ${validActions.join(', ')}` });
-    }
-
-    // Validate all IDs are UUIDs
-    for (const id of ids) {
-      if (!isValidBigInt(id)) {
-        return reply.status(400).send({ error: `Invalid ID format: ${id}` });
-      }
-    }
-
-    let result;
-
-    if (action === 'delete') {
-      const { data, error } = await supabase
-        .from(patientEncounterTable)
-        .delete()
-        .in('id', ids)
-        .eq('user_id', user.id);
-
-      if (error) {
-        return reply.status(500).send({ error: error.message });
-      }
-
-      result = { success: true, message: `${ids.length} encounters deleted`, ids };
-    } else if (action === 'archive') {
-      const { data, error } = await supabase
-        .from(patientEncounterTable)
-        .update({ archived: true })
-        .in('id', ids)
-        .eq('user_id', user.id);
-
-      if (error) {
-        return reply.status(500).send({ error: error.message });
-      }
-
-      result = { success: true, message: `${ids.length} encounters archived`, ids };
-    } else if (action === 'update') {
-      const { updates } = request.body;
-      if (!updates || typeof updates !== 'object') {
-        return reply.status(400).send({ error: 'updates object is required for update action' });
-      }
-
-      const { data, error } = await supabase
-        .from(patientEncounterTable)
-        .update(updates)
-        .in('id', ids)
-        .eq('user_id', user.id);
-
-      if (error) {
-        return reply.status(500).send({ error: error.message });
-      }
-
-      result = { success: true, message: `${ids.length} encounters updated`, ids };
-    }
-
-    return reply.status(200).send(result);
-  } catch (error) {
-    console.error('Error in batch operation:', error);
-    return reply.status(500).send({ error: error.message });
-  }
-}
-
-/**
  * Get a complete patient encounter bundle
  * GET /api/patient-encounters/complete/:id
  * 
@@ -468,6 +388,8 @@ export async function getCompletePatientEncounter(request, reply) {
       );
       delete encounterData.encrypted_name;
     }
+    delete encounterData.encrypted_aes_key;
+    delete encounterData.iv;
 
     // Step 1: Fetch recording linked to encounter
     const { data: recordingData, error: recordingError } = await supabase
@@ -481,6 +403,7 @@ export async function getCompletePatientEncounter(request, reply) {
       return reply.status(500).send({ error: recordingError.message });
     } else if (recordingData) {
       recording = recordingData;
+      delete recording.iv;
     }
 
     // Step 2: Fetch transcript for recording
@@ -504,6 +427,7 @@ export async function getCompletePatientEncounter(request, reply) {
           );
           delete transcriptData.encrypted_transcript_text;
         }
+        delete transcriptData.iv;
         transcript = transcriptData;
       }
     }
@@ -528,6 +452,7 @@ export async function getCompletePatientEncounter(request, reply) {
           );
           delete note.encrypted_soapNote_text;
         }
+        delete note.iv;
         notes.push(note);
       }
     }
@@ -553,13 +478,18 @@ export async function getCompletePatientEncounter(request, reply) {
  * Handles encryption, validation, and atomic transaction with rollback on failure
  * 
  * Request body: {
- *   patientEncounter: { name, ... },
+ *   patientEncounter: { name, recording_file_path, ... },
  *   recording: { recording_file_path, ... },
  *   transcript: { transcript_text, ... },
- *   soapNote_text: { section1, section2, ... }
+ *   soapNote_text: { soapNote: { subjective, objective, assessment, plan }, billingSuggestion }
  * }
  */
 export async function completePatientEncounter(request, reply) {
+  let patientEncounterData = null;
+  let recordingData = null;
+  let transcriptData = null;
+  let soapNoteData = null;
+
   try {
     const supabase = getSupabaseClient(request.headers.authorization);
     const user = request.user;
@@ -568,17 +498,215 @@ export async function completePatientEncounter(request, reply) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    // TODO: Implement complete encounter bundle creation
-    // This should mirror the pages/api/patient-encounters/complete.js POST logic
-    // - Validate all 4 input objects (patientEncounter, recording, transcript, soapNote_text)
-    // - Generate encryption keys & IVs
-    // - Encrypt & save all 4 entities atomically
-    // - Implement ACID rollback on failure (cascading deletes)
+    const { patientEncounter, recording, transcript, soapNote_text } = request.body;
+
+    // Step 1: Validate all required objects are present
+    if (!patientEncounter || !recording || !transcript || !soapNote_text) {
+      return reply.status(400).send({
+        error: 'Missing required fields: patientEncounter, recording, transcript, soapNote_text',
+      });
+    }
+
+    // Step 2: Generate encryption keys for patient encounter
+    const { aesKey, iv: encounterIV } = encryptionUtils.generateAESKeyAndIV();
+
+    // Step 3: Prepare patient encounter for insertion
+    // Note: recording_file_path is stored in the recordings table, not here
+    // Signed URL fields are NOT stored - they're generated on demand via getRecording()
+    const patientEncounterObj = {
+      name: patientEncounter.name,
+      user_id: user.id,
+      iv: encounterIV,
+      encrypted_aes_key: encryptionUtils.encryptAESKey(aesKey),
+    };
+
+    // Encrypt patient name
+    if (patientEncounter.name) {
+      patientEncounterObj.encrypted_name = encryptionUtils.encryptText(
+        patientEncounter.name,
+        aesKey,
+        encounterIV
+      );
+      delete patientEncounterObj.name; // Remove plain field before insert
+    }
+
+    // Step 4: Insert patient encounter
+    console.log('Inserting patient encounter:', patientEncounterObj);
+    const { data: createdEncounter, error: encounterError } = await supabase
+      .from(patientEncounterTable)
+      .insert([patientEncounterObj])
+      .select()
+      .single();
+
+    if (encounterError) {
+      throw new Error(`Failed to create Patient Encounter: ${encounterError.message}`);
+    }
+
+    patientEncounterData = createdEncounter;
+    const encounterId = patientEncounterData.id;
+
+    // Step 5: Insert recording
+    const recordingIV = encryptionUtils.generateRandomIVBase64();
+    const recordingObj = {
+      patientEncounter_id: encounterId,
+      recording_file_path: recording.recording_file_path,
+      user_id: user.id,
+      iv: recordingIV,
+    };
+
+    console.log('Inserting recording:', recordingObj);
+    const { data: createdRecording, error: recordingError } = await supabase
+      .from('recordings')
+      .insert([recordingObj])
+      .select()
+      .single();
+
+    if (recordingError) {
+      throw new Error(`Failed to create Recording: ${recordingError.message}`);
+    }
+
+    recordingData = createdRecording;
+    const recordingId = recordingData.id;
+
+    // Step 6: Insert transcript
+    const transcriptIV = encryptionUtils.generateRandomIVBase64();
+    const transcriptObj = {
+      recording_id: recordingId,
+      encrypted_transcript_text: transcript.transcript_text
+        ? encryptionUtils.encryptText(transcript.transcript_text, aesKey, transcriptIV)
+        : null,
+      user_id: user.id,
+      iv: transcriptIV,
+    };
+
+    console.log('Inserting transcript with encrypted text');
+    const { data: createdTranscript, error: transcriptError } = await supabase
+      .from('transcripts')
+      .insert([transcriptObj])
+      .select()
+      .single();
+
+    if (transcriptError) {
+      throw new Error(`Failed to create Transcript: ${transcriptError.message}`);
+    }
+
+    transcriptData = createdTranscript;
+
+    // Step 7: Insert SOAP note
+    const soapNoteIV = encryptionUtils.generateRandomIVBase64();
     
-    return reply.status(501).send({ error: 'Not yet implemented - migration pending from pages/api/patient-encounters/complete.js' });
+    // soapNote_text is validated as strict object by route middleware
+    const soapNoteObj = {
+      patientEncounter_id: encounterId,
+      encrypted_soapNote_text: soapNote_text
+        ? encryptionUtils.encryptText(JSON.stringify(soapNote_text), aesKey, soapNoteIV)
+        : null,
+      user_id: user.id,
+      iv: soapNoteIV,
+    };
+
+    console.log('Inserting SOAP note with encrypted text');
+    const { data: createdSoapNote, error: soapNoteError } = await supabase
+      .from('soapNotes')
+      .insert([soapNoteObj])
+      .select()
+      .single();
+
+    if (soapNoteError) {
+      throw new Error(`Failed to create SOAP Note: ${soapNoteError.message}`);
+    }
+
+    soapNoteData = createdSoapNote;
+
+    // Step 8: Decrypt all data before returning (to match GET response format)
+    // Get the AES key for decryption
+    const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
+    
+    // Decrypt patient encounter name
+    if (patientEncounterData.encrypted_name) {
+      patientEncounterData.name = encryptionUtils.decryptText(
+        patientEncounterData.encrypted_name,
+        aes_key,
+        patientEncounterData.iv
+      );
+      delete patientEncounterData.encrypted_name;
+    }
+    delete patientEncounterData.encrypted_aes_key;
+    delete patientEncounterData.iv;
+
+    // Decrypt transcript text
+    if (transcriptData.encrypted_transcript_text) {
+      transcriptData.transcript_text = encryptionUtils.decryptText(
+        transcriptData.encrypted_transcript_text,
+        aes_key,
+        transcriptData.iv
+      );
+      delete transcriptData.encrypted_transcript_text;
+    }
+    delete transcriptData.iv;
+
+    // Decrypt SOAP note text
+    if (soapNoteData.encrypted_soapNote_text) {
+      soapNoteData.soapNote_text = JSON.parse(encryptionUtils.decryptText(
+        soapNoteData.encrypted_soapNote_text,
+        aes_key,
+        soapNoteData.iv
+      ));
+      delete soapNoteData.encrypted_soapNote_text;
+    }
+    delete soapNoteData.iv;
+
+    // Remove encryption key and IV from recording if present
+    delete recordingData.iv;
+
+    // Success: Return the created bundle
+    return reply.status(201).send({
+      patientEncounter: patientEncounterData,
+      recording: recordingData,
+      transcript: transcriptData,
+      soapNote: soapNoteData,
+    });
   } catch (error) {
-    console.error('Error creating complete patient encounter:', error);
-    return reply.status(500).send({ error: error.message });
+    // ACID rollback: Delete all created records in reverse order
+    console.error('Error in completePatientEncounter, rolling back:', error.message);
+
+    const supabase = getSupabaseClient(request.headers.authorization);
+
+    // Delete SOAP note first
+    if (soapNoteData && soapNoteData.id) {
+      console.log('Rolling back SOAP note:', soapNoteData.id);
+      await supabase.from('soapNotes').delete().eq('id', soapNoteData.id);
+    }
+
+    // Delete transcript
+    if (transcriptData && transcriptData.id) {
+      console.log('Rolling back transcript:', transcriptData.id);
+      await supabase.from('transcripts').delete().eq('id', transcriptData.id);
+    }
+
+    // Delete recording
+    if (recordingData && recordingData.id) {
+      console.log('Rolling back recording:', recordingData.id);
+      await supabase.from('recordings').delete().eq('id', recordingData.id);
+    }
+
+    // Delete patient encounter (cascade should delete linked records, but this is a safety measure)
+    if (patientEncounterData && patientEncounterData.id) {
+      console.log('Rolling back patient encounter:', patientEncounterData.id);
+      await supabase.from(patientEncounterTable).delete().eq('id', patientEncounterData.id);
+    }
+
+    console.error('Rollback complete');
+
+    // Return error response
+    const errorMessage = error.message || 'Failed to create complete patient encounter';
+    if (errorMessage.includes('unique')) {
+      return reply.status(400).send({
+        error: 'Patient Encounter with this name already exists. Please use a different name.',
+      });
+    }
+
+    return reply.status(500).send({ error: errorMessage });
   }
 }
 

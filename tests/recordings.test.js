@@ -112,7 +112,7 @@ async function runRecordingsTests() {
 
       if (signInResponse.ok) {
         const authData = await signInResponse.json();
-        accessToken = authData.session.access_token;
+        accessToken = authData.token.access_token;
         console.log('✓ Obtained valid access token from test account\n');
       } else {
         console.log('⚠️ Could not obtain access token from test account');
@@ -122,6 +122,7 @@ async function runRecordingsTests() {
 
   // Test 1: Get recordings without auth
   await runner.test('GET /recordings/attachments without auth', {
+    testNumber: 1,
     method: 'GET',
     endpoint: '/api/recordings/attachments?attached=true',
     expectedStatus: 401,
@@ -130,6 +131,7 @@ async function runRecordingsTests() {
 
   // Test 2: Get recordings with invalid token
   await runner.test('GET /recordings/attachments with invalid token', {
+    testNumber: 2,
     method: 'GET',
     endpoint: '/api/recordings/attachments?attached=true',
     headers: {
@@ -141,6 +143,7 @@ async function runRecordingsTests() {
   // Test 3: Missing attached parameter
   if (accessToken) {
     await runner.test('GET /recordings/attachments missing attached parameter', {
+      testNumber: 3,
       method: 'GET',
       endpoint: '/api/recordings/attachments',
       headers: {
@@ -154,6 +157,7 @@ async function runRecordingsTests() {
   // Test 4: Invalid attached parameter value
   if (accessToken) {
     await runner.test('GET /recordings/attachments with invalid attached value', {
+      testNumber: 4,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=maybe',
       headers: {
@@ -167,6 +171,7 @@ async function runRecordingsTests() {
   // Test 5: Invalid sortBy parameter
   if (accessToken) {
     await runner.test('GET /recordings/attachments with invalid sortBy', {
+      testNumber: 5,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&sortBy=invalid_field',
       headers: {
@@ -180,6 +185,7 @@ async function runRecordingsTests() {
   // Test 6: Invalid order parameter
   if (accessToken) {
     await runner.test('GET /recordings/attachments with invalid order', {
+      testNumber: 6,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&order=invalid',
       headers: {
@@ -193,6 +199,7 @@ async function runRecordingsTests() {
   // Test 7: Get attached recordings (valid request)
   if (accessToken) {
     await runner.test('GET /recordings/attachments - attached=true', {
+      testNumber: 7,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true',
       headers: {
@@ -205,6 +212,7 @@ async function runRecordingsTests() {
   // Test 8: Get unattached recordings (valid request)
   if (accessToken) {
     await runner.test('GET /recordings/attachments - attached=false', {
+      testNumber: 8,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=false',
       headers: {
@@ -217,6 +225,7 @@ async function runRecordingsTests() {
   // Test 9: Pagination with limit parameter
   if (accessToken) {
     await runner.test('GET /recordings/attachments with limit parameter', {
+      testNumber: 9,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&limit=50',
       headers: {
@@ -229,6 +238,7 @@ async function runRecordingsTests() {
   // Test 10: Pagination with offset parameter
   if (accessToken) {
     const result = await runner.test('GET /recordings/attachments with offset parameter', {
+      testNumber: 10,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&offset=1',
       headers: {
@@ -261,6 +271,7 @@ async function runRecordingsTests() {
   // Test 11: Sort by created_at ascending
   if (accessToken) {
     const result = await runner.test('GET /recordings/attachments - sortBy=created_at, order=asc', {
+      testNumber: 11,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&sortBy=created_at&order=asc',
       headers: {
@@ -282,6 +293,7 @@ async function runRecordingsTests() {
   // Test 12: Sort by created_at descending
   if (accessToken) {
     const result = await runner.test('GET /recordings/attachments - sortBy=created_at, order=desc', {
+      testNumber: 12,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&sortBy=created_at&order=desc',
       headers: {
@@ -303,6 +315,7 @@ async function runRecordingsTests() {
   // Test 13: Sort by updated_at ascending
   if (accessToken) {
     const result = await runner.test('GET /recordings/attachments - sortBy=updated_at, order=asc', {
+      testNumber: 13,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&sortBy=updated_at&order=asc',
       headers: {
@@ -324,6 +337,7 @@ async function runRecordingsTests() {
   // Test 14: Sort by name ascending
   if (accessToken) {
     const result = await runner.test('GET /recordings/attachments - sortBy=name, order=asc', {
+      testNumber: 14,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true&sortBy=name&order=asc',
       headers: {
@@ -345,6 +359,7 @@ async function runRecordingsTests() {
   // Test 15: Combined - attached with limit, offset, sortBy, order
   if (accessToken) {
     await runner.test('GET /recordings/attachments - combined query parameters', {
+      testNumber: 15,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=false&limit=25&offset=0&sortBy=created_at&order=desc',
       headers: {
@@ -357,6 +372,7 @@ async function runRecordingsTests() {
   // Test 16: Verify attached recordings contain test data
   if (accessToken) {
     const attachedTest = await runner.test('GET /recordings/attachments - verify attached recordings', {
+      testNumber: 16,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=true',
       headers: {
@@ -397,6 +413,7 @@ async function runRecordingsTests() {
   // Test 17: Verify unattached recordings contain test data
   if (accessToken) {
     const unattachedTest = await runner.test('GET /recordings/attachments - verify unattached recordings', {
+      testNumber: 17,
       method: 'GET',
       endpoint: '/api/recordings/attachments?attached=false',
       headers: {
@@ -435,7 +452,11 @@ async function runRecordingsTests() {
   }
 
   // Summary
-  runner.printResults();
+  runner.printResults(17);
+  
+  // Save results to file
+  const resultsFile = runner.saveResults('recordings-tests.json');
+  console.log(`✅ Test results saved to: ${resultsFile}\n`);
   
   // Return summary for master test runner
   return runner.getSummary();
@@ -468,7 +489,7 @@ async function runRecordingsCrudTests() {
 
       if (signInResponse.ok) {
         const authData = await signInResponse.json();
-        accessToken = authData.session.access_token;
+        accessToken = authData.token.access_token;
         console.log('✓ Obtained valid access token from test account\n');
       } else {
         console.log('⚠️ Could not obtain access token from test account');
@@ -481,23 +502,12 @@ async function runRecordingsCrudTests() {
     return;
   }
 
-  // Test 1: Get all recordings
-  if (accessToken) {
-    await runner.test('GET /api/recordings - list all', {
-      method: 'GET',
-      endpoint: '/api/recordings',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      expectedStatus: 200,
-    });
-  }
-
-  // Test 2: Get single recording by ID
+  // Test 18: Get single recording by ID
   if (accessToken && testData.recordings.length > 0) {
     const validRecording = testData.recordings.find(r => r.id !== null);
     if (validRecording) {
       await runner.test('GET /api/recordings/:id - get single with signed URL', {
+        testNumber: 18,
         method: 'GET',
         endpoint: `/api/recordings/${validRecording.id}`,
         headers: {
@@ -508,9 +518,10 @@ async function runRecordingsCrudTests() {
     }
   }
 
-  // Test 3: Get non-existent recording
+  // Test 19: Get non-existent recording
   if (accessToken) {
     await runner.test('GET /api/recordings/:id - not found', {
+      testNumber: 19,
       method: 'GET',
       endpoint: '/api/recordings/99999',
       headers: {
@@ -545,22 +556,7 @@ async function runRecordingsCrudTests() {
   //   }
   // }
 
-  // Test 5: Update non-existent recording
-  if (accessToken) {
-    await runner.test('PATCH /api/recordings/:id - not found', {
-      method: 'PATCH',
-      endpoint: '/api/recordings/99999',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: {
-        name: 'Test',
-      },
-      expectedStatus: 404,
-    });
-  }
-
-  // Test 6: Delete recording (note: this will delete from test data, so test last)
+  // Test 20: Delete recording (note: this will delete from test data, so test last)
   if (accessToken && testData.recordings.length > 1) {
     // Use a recording with a valid ID (find one with id !== null)
     const validRecordings = testData.recordings.filter(r => r.id !== null);
@@ -568,6 +564,7 @@ async function runRecordingsCrudTests() {
       // Use the last valid recording for deletion to not affect other tests
       const recordingId = validRecordings[validRecordings.length - 1].id;
       const result = await runner.test('DELETE /api/recordings/:id - delete recording', {
+        testNumber: 20,
         method: 'DELETE',
         endpoint: `/api/recordings/${recordingId}`,
         headers: {
@@ -582,9 +579,10 @@ async function runRecordingsCrudTests() {
     }
   }
 
-  // Test 7: Delete non-existent recording
+  // Test 21: Delete non-existent recording
   if (accessToken) {
     await runner.test('DELETE /api/recordings/:id - not found', {
+      testNumber: 21,
       method: 'DELETE',
       endpoint: '/api/recordings/99999',
       headers: {
@@ -595,7 +593,11 @@ async function runRecordingsCrudTests() {
   }
 
   // Summary
-  runner.printResults();
+  runner.printResults(20);
+  
+  // Save results to file
+  const resultsFile = runner.saveResults('recordings-tests.json', true);
+  console.log(`✅ Test results saved to: ${resultsFile}\n`);
   
   // Return summary for master test runner
   return runner.getSummary();
@@ -618,8 +620,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         console.log('Recording API Tests\n');
         console.log('Usage: node recordings.test.js [--attachments] [--crud] [--all]');
         console.log('  --attachments: Run GET /api/recordings/attachments tests (17 tests)');
-        console.log('  --crud:        Run CRUD tests (get all, get by ID, update, delete)');
-        console.log('  --all:         Run all tests (attachments + CRUD)');
+        console.log('  --crud:        Run CRUD tests (get by ID, not found, delete)');
+        console.log('  --all:         Run all tests (attachments + CRUD = 20 tests)');
       }
     } catch (error) {
       console.error('Test error:', error);

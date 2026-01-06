@@ -8,10 +8,10 @@ import {
   createPatientEncounter,
   updatePatientEncounter,
   deletePatientEncounter,
-  batchPatientEncounters,
   getCompletePatientEncounter,
   completePatientEncounter,
 } from '../controllers/patientEncountersController.js';
+import { patientEncounterCompleteCreateRequestSchema } from '../schemas/requests.js';
 
 /**
  * Register patient encounters routes
@@ -53,13 +53,6 @@ export async function registerPatientEncountersRoutes(fastify) {
     handler: deletePatientEncounter,
   });
 
-  // POST /patient-encounters/batch
-  // Batch operations on patient encounters
-  fastify.post('/patient-encounters/batch', {
-    preHandler: [fastify.authenticate],
-    handler: batchPatientEncounters,
-  });
-
   // GET /patient-encounters/complete/:id
   // Get a complete patient encounter bundle with all linked data (recording, transcript, SOAP notes)
   fastify.get('/patient-encounters/complete/:id', {
@@ -71,7 +64,23 @@ export async function registerPatientEncountersRoutes(fastify) {
   // Create a complete patient encounter bundle with recording, transcript, and SOAP notes
   fastify.post('/patient-encounters/complete', {
     preHandler: [fastify.authenticate],
-    handler: completePatientEncounter,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body schema
+        const parseResult = patientEncounterCompleteCreateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated request body on request for controller
+        request.body = parseResult.data;
+
+        return completePatientEncounter(request, reply);
+      } catch (error) {
+        console.error('Error in POST /patient-encounters/complete route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 }
 

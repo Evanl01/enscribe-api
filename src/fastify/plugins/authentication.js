@@ -21,7 +21,6 @@ export default fp(async function (fastify, options) {
       const token = authHeader.replace(/^Bearer\s+/i, '');
 
       if (!token) {
-        console.log('[authenticate] No token provided');
         return reply.status(401).send({ error: 'JWT Token is required' });
       }
 
@@ -31,22 +30,13 @@ export default fp(async function (fastify, options) {
       // Verify token with Supabase
       const { data, error } = await supabase.auth.getUser(token);
 
-      console.log('[authenticate] Token verification result:', { 
-        hasUser: !!data?.user, 
-        userId: data?.user?.id,
-        error: error?.message 
-      });
-
       if (error || !data?.user) {
-        console.log('[authenticate] Invalid/expired token:', error?.message);
         return reply.status(401).send({ error: 'Invalid or expired token' });
       }
 
       // Attach authenticated user to request object for use in route handlers
       request.user = data.user;
-      console.log('[authenticate] User authenticated:', data.user.id);
     } catch (err) {
-      console.log('[authenticate] Exception:', err.message);
       fastify.log.error('Authentication error:', err);
       return reply.status(401).send({ error: 'Authentication failed' });
     }

@@ -70,7 +70,7 @@ async function runAuthTests() {
         password: testAccount.password,
       },
       expectedStatus: 200,
-      expectedFields: ['user'],
+      expectedFields: ['user', 'token', 'token.access_token'],
     });
   } else {
     await runner.test('Sign-in with email and password (dummy - will fail)', {
@@ -219,12 +219,12 @@ async function runAuthTests() {
           password: testAccount.password,
         },
         expectedStatus: 200,
-        expectedFields: ['session.access_token', 'user.id', 'user.email'],
+        expectedFields: ['token.access_token', 'user.id', 'user.email'],
       });
 
       // Extract token from Test 15 response for Test 16
       const signInResult = runner.results[runner.results.length - 1];
-      const accessToken = signInResult.body?.session?.access_token;
+      const accessToken = signInResult.body?.token?.access_token;
 
       // Test 16: Check validity with real account token (extracted from Test 15)
       if (accessToken) {
@@ -238,6 +238,7 @@ async function runAuthTests() {
             Authorization: `Bearer ${accessToken}`,
           },
           expectedStatus: 200,
+          expectedFields: ['valid', 'message', 'user.id', 'user.email'],
         });
       } else {
         console.warn('⚠️  Could not extract token from sign-in test, skipping check-validity test');

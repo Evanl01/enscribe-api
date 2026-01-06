@@ -19,9 +19,6 @@ export const patientEncounterCreateRequestSchema = z.object({
 export const patientEncounterCompleteCreateRequestSchema = z.object({
   patientEncounter: z.object({
     name: z.string().min(1, 'Patient encounter name is required'),
-    recording_file_path: z.string().min(1, 'Recording file path is required'),
-    recording_file_signed_url: z.string().nullable().optional(),
-    recording_file_signed_url_expiry: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').nullable().optional(),
   }),
   recording: z.object({
     recording_file_path: z.string().min(1, 'Recording file path is required'),

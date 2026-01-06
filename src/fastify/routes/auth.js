@@ -51,13 +51,13 @@ async function authRoutes(fastify, opts) {
               return reply.status(201).send({
                 message: result.message,
                 user: result.user,
-                session: result.session,
+                token: result.session,
               });
             } else {
               reply.header('set-cookie', setCookie);
               return reply.status(201).send({
                 user: result.user,
-                session: result.session,
+                token: result.session,
               });
             }
           } else {
@@ -78,19 +78,27 @@ async function authRoutes(fastify, opts) {
           }
 
           const setCookie = authController.makeRefreshCookie(result.session.refresh_token);
+          
+          // Create safe session without refresh_token (matches legacy backend behavior)
+          const safeSession = { ...result.session };
+          delete safeSession.refresh_token;
+          
+          console.log('[sign-in] safeSession keys:', Object.keys(safeSession));
+          console.log('[sign-in] safeSession.access_token:', safeSession.access_token ? `${String(safeSession.access_token).slice(0, 50)}...` : 'MISSING');
+          
           if (isJsonClient(request)) {
             reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               message: 'Signed in successfully',
               user: result.user,
-              session: result.session,
+              token: safeSession,
               tid: result.tid,
             });
           } else {
             reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               user: result.user,
-              session: result.session,
+              token: safeSession,
               tid: result.tid,
             });
           }
@@ -128,6 +136,7 @@ async function authRoutes(fastify, opts) {
           }
 
           return reply.status(200).send({
+            valid: true,
             message: 'Token is valid',
             user: result.user,
           });

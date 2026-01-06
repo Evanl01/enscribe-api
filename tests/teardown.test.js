@@ -107,7 +107,7 @@ async function teardownTestData() {
     }
 
     const authData = await signInResponse.json();
-    const accessToken = authData.session.access_token;
+    const accessToken = authData.token.access_token;
     console.log('✓ Authenticated\n');
 
     // Step 2: Create Supabase client

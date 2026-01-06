@@ -174,6 +174,219 @@ async function uploadToStorage(supabase, userId, localPath, filename) {
 }
 
 /**
+ * Setup Test Recordings - Upload fixture files and create/update recording entries
+ * SELF-CONTAINED: Creates test encounters and records independently
+ * Maps files to encounters: first 3 attached, remaining 2 unattached (storage only)
+ */
+async function setupTestRecordings(accessToken, supabase, userId) {
+  console.log('Step 4: Setting up test recordings...\n');
+  
+  const fixtureFiles = getFixtureFiles();
+  const recordings = [];
+  
+  if (fixtureFiles.length === 0) {
+    console.log('  ⚠️ No fixture files found in tests/fixtures/\n');
+    return { recordings: [], encounters: [] };
+  }
+  
+  // STEP 4A: Create/fetch test encounters (only need first 3 for attached recordings)
+  console.log('Creating test encounters for recordings...');
+  const testEncounterNames = ['Alpha', 'Bravo', 'Charlie'];
+  const createdEncounters = [];
+  
+  try {
+    const fetchResponse = await fetch('http://localhost:3001/api/patient-encounters', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (fetchResponse.ok) {
+      const existingEncounters = await fetchResponse.json();
+      const existingMap = new Map(existingEncounters.map(e => [e.name, e]));
+      
+      for (const name of testEncounterNames) {
+        const existing = existingMap.get(name);
+        
+        if (existing) {
+          createdEncounters.push(existing);
+          console.log(`  ⏭️  Encounter "${name}" exists (ID: ${existing.id})`);
+        } else {
+          try {
+            const createResponse = await fetch('http://localhost:3001/api/patient-encounters', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ name }),
+            });
+            
+            if (createResponse.ok) {
+              const created = await createResponse.json();
+              const encounterId = created.id || created.data?.id;
+              createdEncounters.push({ id: encounterId, name });
+              console.log(`  ✓ Created encounter: "${name}" (ID: ${encounterId})`);
+            } else {
+              console.warn(`  ⚠️  Failed to create encounter "${name}": ${createResponse.status}`);
+            }
+          } catch (error) {
+            console.warn(`  ⚠️  Error creating encounter "${name}": ${error.message}`);
+          }
+        }
+      }
+    } else {
+      console.warn(`  ⚠️  Error fetching encounters: ${fetchResponse.status}`);
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error in encounter setup: ${error.message}`);
+  }
+  
+  console.log();
+  
+  // STEP 4B: Check storage and upload only missing files
+  console.log('Checking storage and uploading missing files...');
+  
+  // Get list of files already in storage
+  let storageFiles = [];
+  try {
+    const { data, error } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .list(`${userId}`, { limit: 100 });
+    
+    if (error) {
+      console.warn(`  ⚠️  Error listing storage: ${error.message}`);
+    } else {
+      storageFiles = (data || []).map(f => f.name);
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error checking storage: ${error.message}`);
+  }
+  
+  // Upload only files that don't already exist in storage
+  const uploadedFiles = [];
+  for (const filename of fixtureFiles) {
+    if (storageFiles.includes(filename)) {
+      console.log(`  ⏭️  Skipping "${filename}" (already in storage)`);
+      uploadedFiles.push({ filename, remotePath: `${userId}/${filename}` });
+    } else {
+      const localPath = path.join(FIXTURES_DIR, filename);
+      const remotePath = await uploadToStorage(supabase, userId, localPath, filename);
+      if (remotePath) {
+        uploadedFiles.push({ filename, remotePath });
+        console.log(`  ✓ Uploaded: "${filename}"`);
+      }
+    }
+  }
+  
+  console.log();
+  
+  // STEP 4C: Create recording entries for attached files only (first 3)
+  console.log('Creating/updating recording entries...');
+  
+  // Fetch existing recordings to avoid duplicates
+  let existingRecordings = [];
+  try {
+    const recordingsResponse = await fetch('http://localhost:3001/api/recordings', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (recordingsResponse.ok) {
+      existingRecordings = await recordingsResponse.json();
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error fetching existing recordings: ${error.message}`);
+  }
+  
+  // Only attach first 3 files to encounters; last 2 stay unattached (storage only)
+  const attachmentCount = 3;
+  
+  for (let i = 0; i < uploadedFiles.length; i++) {
+    const { filename, remotePath } = uploadedFiles[i];
+    const shouldAttach = i < attachmentCount;
+    
+    if (!shouldAttach) {
+      console.log(`  ⏭️  Skipping "${filename}" (unattached, storage only)`);
+      // Track unattached files in recordings array
+      recordings.push({
+        id: null,
+        filename,
+        path: remotePath,
+        attached: false,
+        encounterId: null,
+      });
+      continue;
+    }
+    
+    const encounterId = createdEncounters[i]?.id;
+    
+    if (!encounterId) {
+      console.log(`  ✗ Skipping "${filename}": No encounter available`);
+      continue;
+    }
+    
+    // Check if recording already exists with this file_path and encounter_id
+    const existingRecording = existingRecordings.find(r => 
+      r.recording_file_path === remotePath && 
+      r.patientEncounter_id === encounterId
+    );
+    
+    if (existingRecording) {
+      console.log(`  ⏭️  Recording "${filename}" already exists (ID: ${existingRecording.id})`);
+      recordings.push({
+        id: existingRecording.id,
+        filename,
+        path: remotePath,
+        attached: true,
+        encounterId,
+      });
+      continue;
+    }
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/recordings', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          patientEncounter_id: encounterId,
+          recording_file_path: remotePath,
+        }),
+      });
+      
+      if (response.ok) {
+        const recordingData = await response.json();
+        const recordingId = recordingData.id || recordingData.data?.id;
+        
+        console.log(`  ✓ Created recording: "${filename}" (attached to encounter ${encounterId})`);
+        
+        recordings.push({
+          id: recordingId,
+          filename,
+          path: remotePath,
+          attached: true,
+          encounterId,
+        });
+      } else {
+        const error = await response.json();
+        console.log(`  ✗ Failed to create recording for "${filename}": ${error.error || response.statusText}`);
+      }
+    } catch (error) {
+      console.log(`  ✗ Error creating recording for "${filename}": ${error.message}`);
+    }
+  }
+  
+  console.log();
+  return { recordings, encounters: createdEncounters };
+}
+
+/**
  * Get all remote recordings from Supabase bucket using user's token
  */
 async function getRemoteRecordingFiles(supabase, userId) {
@@ -414,7 +627,7 @@ async function setupSoapNotes(accessToken, encounters) {
   }
   
   const createdSoapNotes = [];
-  const expectedNotesPerEncounter = [2, 1]; // 2 for first, 1 for second
+  const expectedNotesPerEncounter = [2, 1]; // 2 for first (Alpha), 1 for second (Bravo)
   
   for (let encIdx = 0; encIdx < 2; encIdx++) {
     const encounter = encounters[encIdx];
@@ -422,7 +635,7 @@ async function setupSoapNotes(accessToken, encounters) {
     
     // Check existing notes for this encounter via complete encounter endpoint
     try {
-      const getResponse = await fetch(`http://localhost:3001/api/patient-encounter/complete:${encounter.id}`, {
+      const getResponse = await fetch(`http://localhost:3001/api/patient-encounters/complete/${encounter.id}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
@@ -436,13 +649,21 @@ async function setupSoapNotes(accessToken, encounters) {
         existingNotes = encounterData.soapNotes || [];
       }
       
-      // Warn if more notes than expected
+      console.log(`  Found ${existingNotes.length} existing SOAP note(s) for encounter "${encounter.name}" (ID: ${encounter.id})`);
+      // Check if we have more notes than expected
       if (existingNotes.length > expectedCount) {
-        console.warn(`  ⚠️  WARNING: Encounter "${encounter.name}" has ${existingNotes.length} notes, expected ${expectedCount}`);
+        console.warn(`  ⚠️  SKIPPING: Encounter "${encounter.name}" has ${existingNotes.length} notes, expected ${expectedCount}`);
+        continue;
+      }
+      
+      // If we already have the expected count, skip
+      if (existingNotes.length === expectedCount) {
+        console.log(`  ⏭️  Skipped. ${existingNotes.length} existing note(s) for "${encounter.name}" (as expected)`);
+        continue;
       }
       
       // Create only missing notes
-      const notesToCreate = Math.max(0, expectedCount - existingNotes.length);
+      const notesToCreate = expectedCount - existingNotes.length;
       const startIndex = existingNotes.length + 1; // Next sequential note number
       
       for (let i = 0; i < notesToCreate; i++) {
@@ -483,11 +704,6 @@ async function setupSoapNotes(accessToken, encounters) {
         } catch (error) {
           console.warn(`  ⚠️  Error creating SOAP note ${noteNum}: ${error.message}`);
         }
-      }
-      
-      // Log skipped notes
-      if (existingNotes.length > 0) {
-        console.log(`  ⏭️  Skipping ${existingNotes.length} existing note(s) for "${encounter.name}"`);
       }
       
     } catch (error) {
@@ -622,7 +838,7 @@ async function setupTestData() {
     }
 
     const authData = await signInResponse.json();
-    const accessToken = authData.session.access_token;
+    const accessToken = authData.token.access_token;
     const userId = authData.user.id;
     console.log(`✓ Authenticated as: ${userId}\n`);
 
@@ -732,94 +948,23 @@ async function setupTestData() {
     }
     console.log();
 
-    // ===== STEP 4: Setup Recordings (if needed) =====
-    let recordingsResult = [];
-    const recordingsNeeded = matchedAttached.length < 3 || unmatchedUnattached.length < 2;
-    
-    if (recordingsNeeded) {
-      console.log('Step 4: Setting up test recordings...\n');
-      // TODO: Extract setupRecordings() logic here from existing code below
-      // For now, recordings setup continues in the else block below
-    } else {
-      console.log('Step 4: Complete test data already exists. Skipping recording setup.\n');
-      recordingsResult = [
-        ...matchedAttached.slice(0, 3),
-        ...unmatchedUnattached.slice(0, 2),
-      ];
-    }
+    // ===== STEP 4: Setup Recordings (self-contained: creates encounters, uploads files, creates recordings) =====
+    const recordingsResult = await setupTestRecordings(accessToken, supabase, userId);
+    let createdEncounters = recordingsResult.encounters || [];
 
-    // ===== STEP 5: Setup Patient Encounters (always runs) =====
-    console.log('Step 5: Setting up patient encounters...');
-    let createdEncounters = await setupPatientEncounters(accessToken);
-    
-    // If no encounters created, fetch existing ones
-    if (createdEncounters.length === 0) {
-      try {
-        const encResponse = await fetch('http://localhost:3001/api/patient-encounters', {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (encResponse.ok) {
-          createdEncounters = await encResponse.json();
-        }
-      } catch (error) {
-        console.warn(`  ⚠️  Error fetching encounters: ${error.message}`);
-      }
-    }
-
-    // ===== STEP 6: Setup DotPhrases (always runs) =====
-    console.log('Step 6: Setting up dotPhrases...');
+    // ===== STEP 5: Setup DotPhrases (always runs) =====
+    console.log('Step 5: Setting up dotPhrases...');
     const createdDotPhrases = await setupDotPhrases(accessToken);
     
-    // ===== STEP 7: Setup SOAP Notes (always runs if encounters exist) =====
-    console.log('Step 7: Setting up SOAP notes...');
+    // ===== STEP 6: Setup SOAP Notes (always runs if encounters exist) =====
+    console.log('Step 6: Setting up SOAP notes...');
     const createdSoapNotes = await setupSoapNotes(accessToken, createdEncounters);
 
-    // ===== STEP 8: Save test data =====
-    console.log('Step 8: Saving test data...\n');
+    // ===== STEP 7: Save test data =====
+    console.log('Step 7: Saving test data...\n');
     
-    // Use first 3 encounters from createdEncounters (already has all 3 from setup)
+    // Use first 3 encounters for SOAP notes testing (as defined by SOAP notes setup)
     const firstThreeEncounters = createdEncounters.slice(0, 3);
-
-    // If recordings setup was needed, do it now before saving testData
-    if (recordingsNeeded) {
-      // TODO: This section should be replaced with setupRecordings() return value
-      console.log('Setting up recordings...');
-      // For now, use matched+unmatched
-      recordingsResult = [
-        ...matchedAttached.slice(0, 3),
-        ...unmatchedUnattached.slice(0, 2),
-      ];
-    }
-
-    // Load old testData to compare encounter IDs
-    let oldRecordings = [];
-    try {
-      if (fs.existsSync(TEST_DATA_FILE)) {
-        const oldTestData = JSON.parse(fs.readFileSync(TEST_DATA_FILE, 'utf-8'));
-        oldRecordings = oldTestData.recordings || [];
-      }
-    } catch (e) {
-      // Ignore if file doesn't exist or can't be parsed
-    }
-
-    // Update recordings with encounter IDs and print status
-    const recordingsWithIds = recordingsResult.map(r => {
-      if (r.encounterId !== null) {
-        const oldRec = oldRecordings.find(or => or.filename === r.filename);
-        const oldEncounterId = oldRec?.encounterId;
-        
-        if (oldEncounterId === r.encounterId) {
-          console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (SAME AS BEFORE)`);
-        } else {
-          console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (UPDATED)`);
-        }
-      }
-      return r;
-    });
 
     const testData = {
       createdAt: new Date().toISOString(),
@@ -832,7 +977,12 @@ async function setupTestData() {
         name: e.name,
         displayId: 900 + i,
       })),
-      recordings: recordingsWithIds,
+      recordings: recordingsResult.recordings,
+      recordingEncounters: createdEncounters.map((e, i) => ({
+        id: e.id,
+        name: e.name,
+        index: i,
+      })),
       dotPhrases: createdDotPhrases,
       soapNotes: {
         note: 'Created during setup - 3 SOAP notes: 2 attached to encounter 1, 1 attached to encounter 2',
@@ -849,9 +999,9 @@ async function setupTestData() {
     console.log('='.repeat(70));
     console.log(`\nTest data created:`);
     console.log(`  Encounters: ${firstThreeEncounters.length} (IDs: ${firstThreeEncounters.map(e => e.id).join(', ')})`);
-    const attachedCount = recordingsWithIds.filter(r => r.attached).length;
-    const unattachedCount = recordingsWithIds.filter(r => !r.attached).length;
-    console.log(`  Recordings: ${recordingsWithIds.length} (${attachedCount} attached, ${unattachedCount} unattached)`);
+    const attachedCount = recordingsResult.recordings.filter(r => r.attached).length;
+    const unattachedCount = recordingsResult.recordings.filter(r => !r.attached).length;
+    console.log(`  Recordings: ${recordingsResult.recordings.length} (${attachedCount} attached, ${unattachedCount} unattached)`);
     console.log(`  SOAP Notes: ${createdSoapNotes.length} created (3 expected)`);
     console.log(`  DotPhrases: ${createdDotPhrases.length} reconciled`);
     console.log(`  Storage: ${RECORDINGS_BUCKET} bucket`);

@@ -195,8 +195,8 @@ async function runSoapNotesTests() {
           }),
         });
         const signInResponse = await response.json();
-        if (signInResponse?.session?.access_token) {
-          realAccessToken = signInResponse.session.access_token;
+        if (signInResponse?.token?.access_token) {
+          realAccessToken = signInResponse.token.access_token;
           console.log('✅ Obtained real access token for validation tests\n');
 
           // Use existing encounter from test data (last one has no SOAP notes attached)
@@ -615,6 +615,7 @@ async function runSoapNotesTests() {
   // ===== SUMMARY AND CLEANUP =====
 
   // Print test results
+  runner.saveResults('soap-notes-tests.json');
   runner.printResults();
 
   // Return summary for master test runner
@@ -631,3 +632,5 @@ runSoapNotesTests().catch((error) => {
   console.error('Test suite error:', error);
   process.exit(1);
 });
+
+export { runSoapNotesTests };

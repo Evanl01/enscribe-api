@@ -83,7 +83,7 @@ async function runTranscriptsTests() {
 
       if (signInResponse.ok) {
         const authData = await signInResponse.json();
-        accessToken = authData.session.access_token;
+        accessToken = authData.token.access_token;
         console.log('✓ Obtained valid access token from test account\n');
       } else {
         console.log('⚠️ Could not obtain access token from test account');
@@ -430,6 +430,7 @@ async function runTranscriptsTests() {
   }
 
   // Summary
+  runner.saveResults('transcripts-tests.json');
   runner.printResults();
   
   // Return summary for master test runner

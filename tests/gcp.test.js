@@ -420,8 +420,8 @@ export async function runGcpTests() {
           }),
         });
         const signInResponse = await response.json();
-        if (signInResponse?.session?.access_token) {
-          accessToken = signInResponse.session.access_token;
+        if (signInResponse?.token?.access_token) {
+          accessToken = signInResponse.token.access_token;
           console.log('✅ Obtained real access token from test account\n');
         }
       } catch (error) {

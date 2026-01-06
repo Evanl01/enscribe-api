@@ -54,9 +54,12 @@ export class TestRunner {
 
   /**
    * Add a test case
+   * @param {string} name - Test name
+   * @param {object} config - Test configuration
+   * @param {number} config.testNumber - (Optional) Explicit test number for tracking skipped tests
    */
   async test(name, config) {
-    const { method, endpoint, body, headers, expectedStatus, expectedFields, customValidator, onSuccess } = config;
+    const { method, endpoint, body, headers, expectedStatus, expectedFields, customValidator, onSuccess, testNumber } = config;
 
     const url = `${this.baseUrl}${endpoint}`;
     const response = await makeRequest(method, url, { body, headers, expectedStatus });
@@ -93,6 +96,7 @@ export class TestRunner {
       expectedStatus,
       body: response.body,
       customMessage,
+      testNumber: testNumber || null,
       timestamp: new Date().toISOString(),
     };
 
@@ -157,35 +161,78 @@ export class TestRunner {
 
   /**
    * Print results to console
+   * @param {number} totalTests - Total tests planned (including skipped ones), optional
    */
-  printResults() {
+  printResults(totalTests = null) {
     const summary = this.getSummary();
+    const testNumberMap = new Map();
+
+    // Build map of executed test numbers
+    this.results.forEach((result) => {
+      if (result.testNumber) {
+        testNumberMap.set(result.testNumber, result);
+      }
+    });
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Test Suite: ${this.testName}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    this.results.forEach((result, index) => {
-      const status = result.passed ? '✅' : '❌';
-      console.log(`${status} Test ${index + 1}: ${result.name}`);
-      
-      if (result.customMessage) {
-        console.log(`   ${result.customMessage}`);
+    let passCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+
+    // If explicit test numbers provided, show all tests including skipped
+    let resultsToShow = [];
+    if (totalTests) {
+      // Get the highest test number from explicit numbering
+      const numberedResults = this.results.filter(r => r.testNumber);
+      const maxTestNum = numberedResults.length > 0 ? Math.max(...numberedResults.map(r => r.testNumber)) : 0;
+      const targetMax = Math.max(maxTestNum, totalTests);
+
+      for (let i = 1; i <= targetMax; i++) {
+        if (testNumberMap.has(i)) {
+          resultsToShow.push({ testNumber: i, result: testNumberMap.get(i) });
+        } else {
+          resultsToShow.push({ testNumber: i, result: null }); // Skipped test
+        }
       }
-      
-      const responseBody = result.body || result.fullResponse || {};
-      const responseStr = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
-      const truncated = responseStr.substring(0, 500);
-      
-      if (!result.passed) {
-        console.log(`   Expected: ${result.expectedStatus} | Got: ${result.status}`);
+    } else {
+      // Fallback: show only executed tests with auto-generated numbers
+      this.results.forEach((result, index) => {
+        resultsToShow.push({ testNumber: index + 1, result });
+      });
+    }
+
+    resultsToShow.forEach(({ testNumber, result }) => {
+      if (!result) {
+        console.log(`⊘ Test ${testNumber}: SKIPPED (dependency not met)\n`);
+        skipCount++;
+      } else {
+        const status = result.passed ? '✅' : '❌';
+        console.log(`${status} Test ${testNumber}: ${result.name}`);
+        
+        if (result.customMessage) {
+          console.log(`   ${result.customMessage}`);
+        }
+        
+        const responseBody = result.body || result.fullResponse || {};
+        const responseStr = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+        const truncated = responseStr.substring(0, 500);
+        
+        if (!result.passed) {
+          console.log(`   Expected: ${result.expectedStatus} | Got: ${result.status}`);
+          failCount++;
+        } else {
+          passCount++;
+        }
+        console.log(`   Response: ${truncated}${responseStr.length > 500 ? '...' : ''}`);
+        console.log(); // Double space
       }
-      console.log(`   Response: ${truncated}${responseStr.length > 500 ? '...' : ''}`);
-      console.log(); // Double space
     });
 
     console.log(`${'-'.repeat(60)}`);
-    console.log(`Total: ${summary.total} | Passed: ${summary.passed} | Failed: ${summary.failed}`);
+    console.log(`Total Executed: ${summary.total} | Passed: ${passCount} | Failed: ${failCount} | Skipped: ${skipCount}`);
     console.log(`Pass Rate: ${summary.passRate} | Duration: ${summary.duration}`);
     console.log(`${'='.repeat(60)}\n`);
   }

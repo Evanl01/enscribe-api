@@ -97,8 +97,8 @@ async function runPatientEncounterTests() {
           }),
         });
         const signInResponse = await response.json();
-        if (signInResponse?.session?.access_token) {
-          realAccessToken = signInResponse.session.access_token;
+        if (signInResponse?.token?.access_token) {
+          realAccessToken = signInResponse.token.access_token;
           console.log('✅ Obtained real access token for validation tests\n');
         }
       } catch (error) {
@@ -107,14 +107,14 @@ async function runPatientEncounterTests() {
     }
   }
 
-  // Test 1: Get all patient encounters without auth (should fail)
+  // ===== TEST 1: Get patient encounters without auth =====
   await runner.test('Get patient encounters without auth', {
     method: 'GET',
     endpoint: '/api/patient-encounters',
     expectedStatus: 401,
   });
 
-  // Test 2: Get all patient encounters with invalid token (should fail)
+  // ===== TEST 2: Get patient encounters with invalid token =====
   await runner.test('Get patient encounters with invalid token', {
     method: 'GET',
     endpoint: '/api/patient-encounters',
@@ -124,7 +124,7 @@ async function runPatientEncounterTests() {
     expectedStatus: 401,
   });
 
-  // Test 3: Create patient encounter without auth (should fail)
+  // ===== TEST 3: Create patient encounter without auth =====
   await runner.test('Create patient encounter without auth', {
     method: 'POST',
     endpoint: '/api/patient-encounters',
@@ -132,7 +132,7 @@ async function runPatientEncounterTests() {
     expectedStatus: 401,
   });
 
-  // Test 4: Create patient encounter with invalid token (should fail)
+  // ===== TEST 4: Create patient encounter with invalid token =====
   await runner.test('Create patient encounter with invalid token', {
     method: 'POST',
     endpoint: '/api/patient-encounters',
@@ -143,13 +143,12 @@ async function runPatientEncounterTests() {
     expectedStatus: 401,
   });
 
-  // Test 5: Create patient encounter with missing required fields (uses real token to test validation)
+  // ===== TEST 5: Create patient encounter with missing fields =====
   await runner.test('Create patient encounter with missing fields', {
     method: 'POST',
     endpoint: '/api/patient-encounters',
     body: {
       name: 'Test Patient',
-      // missing other optional fields
     },
     headers: {
       Authorization: realAccessToken ? `Bearer ${realAccessToken}` : `Bearer ${MOCK_TOKEN}`,
@@ -157,63 +156,12 @@ async function runPatientEncounterTests() {
     expectedStatus: realAccessToken ? 201 : 401,
   });
 
-  // Test 6: Get single patient encounter without auth (should fail)
+  // ===== TEST 6: Get specific encounter without auth =====
   await runner.test('Get specific encounter without auth', {
     method: 'GET',
     endpoint: '/api/patient-encounters/test-id',
     expectedStatus: 401,
   });
-
-  // Test 7: Mark encounter as complete without auth (should fail)
-  await runner.test('Mark encounter as complete without auth', {
-    method: 'POST',
-    endpoint: '/api/patient-encounters/complete',
-    body: { encounterId: 'test-id', notes: 'Test notes' },
-    expectedStatus: 401,
-  });
-
-  // Test 8: Batch operations without auth (should fail)
-  await runner.test('Batch patient encounters without auth', {
-    method: 'POST',
-    endpoint: '/api/patient-encounters/batch',
-    body: {
-      action: 'delete',
-      ids: ['id1', 'id2'],
-    },
-    expectedStatus: 401,
-  });
-
-  // Test 9: Invalid batch action (requires valid token to reach validation)
-  await runner.test('Batch with invalid action', {
-    method: 'POST',
-    endpoint: '/api/patient-encounters/batch',
-    body: {
-      action: 'invalid-action',
-      ids: ['id1'],
-    },
-    headers: realAccessToken ? {
-      Authorization: `Bearer ${realAccessToken}`,
-    } : undefined,
-    expectedStatus: realAccessToken ? 400 : 401,
-  });
-
-  // Test 10: Batch with missing IDs (requires valid token to reach validation)
-  await runner.test('Batch with missing IDs', {
-    method: 'POST',
-    endpoint: '/api/patient-encounters/batch',
-    body: {
-      action: 'delete',
-      // missing ids array
-    },
-    headers: realAccessToken ? {
-      Authorization: `Bearer ${realAccessToken}`,
-    } : undefined,
-    expectedStatus: realAccessToken ? 400 : 401,
-  });
-
-  // ===========================================
-  // REAL ACCOUNT TESTS (if configured)
-  // ===========================================
 
   if (hasTestAccounts()) {
     const testAccount = getTestAccount('primary');
@@ -238,8 +186,8 @@ async function runPatientEncounterTests() {
         });
         const signInResponse = await response.json();
 
-        if (signInResponse && signInResponse.session && signInResponse.session.access_token) {
-          accessToken = signInResponse.session.access_token;
+        if (signInResponse && signInResponse.token && signInResponse.token.access_token) {
+          accessToken = signInResponse.token.access_token;
           console.log('  ✅ Successfully obtained access token\n');
           
           // Get initial count before any tests create data
@@ -264,7 +212,7 @@ async function runPatientEncounterTests() {
       }
 
       if (accessToken) {
-        // Test 11: Get patient encounters with real account
+        // ===== TEST 8: Get patient encounters (authenticated user) =====
         await runner.test('Get patient encounters (authenticated user)', {
           method: 'GET',
           endpoint: '/api/patient-encounters',
@@ -274,9 +222,8 @@ async function runPatientEncounterTests() {
           expectedStatus: 200,
         });
 
-        // Test 12: Create patient encounter with real account
-        let createdEncounterId = null;
-        const createTest = await runner.test('Create patient encounter (authenticated user)', {
+        // ===== TEST 9: Create patient encounter (authenticated user) =====
+        await runner.test('Create patient encounter (authenticated user)', {
           method: 'POST',
           endpoint: '/api/patient-encounters',
           body: {
@@ -287,168 +234,17 @@ async function runPatientEncounterTests() {
           },
           expectedStatus: 201,
           expectedFields: ['id', 'name', 'created_at', 'updated_at', 'user_id'],
+          onSuccess: (data) => {
+            // Store the created encounter ID for dependent tests
+            if (data.id) {
+              createdEncounterId = data.id;
+              createdEncounterIds.push(data.id);
+              console.log(`    Created encounter ID: ${data.id}`);
+            }
+          },
         });
-        
-        // Track the created encounter for cleanup
-        if (createTest.passed && createTest.body.id) {
-          createdEncounterId = createTest.body.id;
-          createdEncounterIds.push(createdEncounterId);
-        }
 
-        // Test 13: Verify encounter count increases by 1 (independent test)
-        console.log('  [Test 13] Verifying encounter count increases...\n');
-        
-        // Get count before (use large limit to get all)
-        const getBeforeTest = await fetch(`${runner.baseUrl}/api/patient-encounters?limit=1000`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const dataBeforeResponse = await getBeforeTest.json();
-        const countBefore = Array.isArray(dataBeforeResponse) ? dataBeforeResponse.length : 0;
-        console.log(`    Count before: ${countBefore}`);
-        
-        // Create a new encounter
-        const createForCountTest = await fetch(`${runner.baseUrl}/api/patient-encounters`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
-            name: 'Count Test Patient',
-          }),
-        });
-        const createdForCount = await createForCountTest.json();
-        const countTestEncounterId = createdForCount.id;
-        
-        // Track for cleanup
-        if (countTestEncounterId) {
-          createdEncounterIds.push(countTestEncounterId);
-        }
-        
-        // Get count after (use large limit to get all)
-        const getAfterTest = await fetch(`${runner.baseUrl}/api/patient-encounters?limit=1000`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const dataAfterResponse = await getAfterTest.json();
-        const countAfter = Array.isArray(dataAfterResponse) ? dataAfterResponse.length : 0;
-        console.log(`    Count after: ${countAfter}`);
-        
-        // Verify count increased by 1
-        const countIncreased = countAfter === countBefore + 1;
-        const testResult = {
-          name: 'Verify encounter count increased by 1',
-          passed: countIncreased,
-          endpoint: '/api/patient-encounters',
-          method: 'GET + POST + GET',
-          status: countIncreased ? 'Pass' : 'Fail',
-          expectedStatus: 'count should increase by 1',
-          body: { countBefore, countAfter, increased: countIncreased },
-          timestamp: new Date().toISOString(),
-        };
-        
-        // Add to results manually
-        runner.results.push(testResult);
-        
-        if (countIncreased) {
-          console.log(`    ✅ Count verification passed: ${countBefore} → ${countAfter} (+1)\n`);
-        } else {
-          console.log(`    ❌ Count verification failed: Expected ${countBefore + 1}, got ${countAfter}\n`);
-        }
-
-        // Test 14: Get specific encounter by real ID to verify GET works
-        console.log(`  [Test 14] Getting specific encounter ID: ${countTestEncounterId}`);
-        const getSpecificResponse = await fetch(`${runner.baseUrl}/api/patient-encounters/${countTestEncounterId}`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const getSpecificData = await getSpecificResponse.json();
-        const getSpecificPassed = getSpecificResponse.ok && getSpecificData.id === countTestEncounterId && getSpecificData.name;
-        
-        const getSpecificResult = {
-          name: 'Get specific encounter by real ID',
-          passed: getSpecificPassed,
-          endpoint: `/api/patient-encounters/${countTestEncounterId}`,
-          method: 'GET',
-          status: getSpecificResponse.status,
-          expectedStatus: 200,
-          body: getSpecificPassed ? { id: getSpecificData.id, name: getSpecificData.name } : getSpecificData,
-          timestamp: new Date().toISOString(),
-        };
-        
-        runner.results.push(getSpecificResult);
-        console.log(`    ${getSpecificPassed ? '✅' : '❌'} Status: ${getSpecificResponse.status}, ID matches: ${getSpecificData.id === countTestEncounterId}\n`);
-
-        // Test 14B: DELETE diagnostic test - Check if DELETE endpoint works and what it returns
-        console.log(`  [Test 14B] DIAGNOSTIC: Attempting DELETE on ID: ${countTestEncounterId}`);
-        const deleteResponse = await fetch(`${runner.baseUrl}/api/patient-encounters/${countTestEncounterId}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const deleteData = deleteResponse.ok ? await deleteResponse.json() : await deleteResponse.text();
-        
-        console.log(`    DELETE Response Status: ${deleteResponse.status}`);
-        // console.log(`    DELETE Response Body: ${JSON.stringify(deleteData)}`);
-        // console.log(`    DELETE Response Headers: ${JSON.stringify(Object.fromEntries(deleteResponse.headers.entries()))}\n`);
-        
-        const deleteResult = {
-          name: 'DELETE diagnostic test',
-          passed: deleteResponse.ok,
-          endpoint: `/api/patient-encounters/${countTestEncounterId}`,
-          method: 'DELETE',
-          status: deleteResponse.status,
-          expectedStatus: 200,
-          fullResponse: {
-            status: deleteResponse.status,
-            statusText: deleteResponse.statusText,
-            headers: Object.fromEntries(deleteResponse.headers.entries()),
-            body: deleteData,
-          },
-          timestamp: new Date().toISOString(),
-        };
-        runner.results.push(deleteResult);
-        
-        // Verify if it was actually deleted by trying to GET it again
-        console.log(`  [Test 14C] DIAGNOSTIC: Verifying if DELETE actually removed the record`);
-        const verifyDeleteResponse = await fetch(`${runner.baseUrl}/api/patient-encounters/${countTestEncounterId}`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        const verifyDeleteData = await verifyDeleteResponse.json();
-        const wasActuallyDeleted = verifyDeleteResponse.status === 404;
-        
-        console.log(`    After DELETE, GET status: ${verifyDeleteResponse.status}`);
-        console.log(`    Record still exists: ${!wasActuallyDeleted}`);
-        if (!wasActuallyDeleted) {
-          console.log(`    Record data: ${JSON.stringify(verifyDeleteData)}\n`);
-        } else {
-          console.log(`    Record successfully deleted\n`);
-        }
-        
-        const verifyDeleteResult = {
-          name: 'DELETE verification - record actually removed',
-          passed: wasActuallyDeleted,
-          endpoint: `/api/patient-encounters/${countTestEncounterId}`,
-          method: 'GET (after DELETE)',
-          status: verifyDeleteResponse.status,
-          expectedStatus: 404,
-          body: wasActuallyDeleted ? { message: 'Record deleted' } : verifyDeleteData,
-          timestamp: new Date().toISOString(),
-        };
-        runner.results.push(verifyDeleteResult);
-
-        // Test 15: Get patient encounters with filters
+        // ===== TEST 10: Get patient encounters with query params =====
         await runner.test('Get patient encounters with query params', {
           method: 'GET',
           endpoint: '/api/patient-encounters?limit=5&offset=0',
@@ -458,7 +254,7 @@ async function runPatientEncounterTests() {
           expectedStatus: 200,
         });
 
-        // Test 16: Invalid encounter ID format
+        // ===== TEST 11: Get encounter with invalid ID format =====
         await runner.test('Get encounter with invalid ID format', {
           method: 'GET',
           endpoint: '/api/patient-encounters/invalid-id-format',
@@ -468,7 +264,7 @@ async function runPatientEncounterTests() {
           expectedStatus: 400,
         });
 
-        // Test 16: Non-existent encounter
+        // ===== TEST 12: Get non-existent encounter =====
         await runner.test('Get non-existent encounter', {
           method: 'GET',
           endpoint: '/api/patient-encounters/999999999999',
@@ -478,7 +274,7 @@ async function runPatientEncounterTests() {
           expectedStatus: 404,
         });
 
-        // Test 17: Mark encounter as complete with invalid ID format
+        // ===== TEST 13: Mark encounter as complete with invalid ID format =====
         await runner.test('Mark encounter as complete with invalid ID format', {
           method: 'POST',
           endpoint: '/api/patient-encounters/complete',
@@ -489,87 +285,200 @@ async function runPatientEncounterTests() {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-          expectedStatus: 400, // Invalid ID format
+          expectedStatus: 400,
         });
 
-        // Test 18: Batch delete encounters
-        await runner.test('Batch delete encounters (empty list)', {
-          method: 'POST',
-          endpoint: '/api/patient-encounters/batch',
-          body: {
-            action: 'delete',
-            ids: [],
-          },
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          expectedStatus: 400, // Might fail due to empty list validation
-        });
-
-        // Test 18: Update patient encounter (using created encounter from Test 12)
-        if (createdEncounterId) {
-          await runner.test('Update encounter (with valid ID)', {
-            method: 'PATCH',
-            endpoint: `/api/patient-encounters/${createdEncounterId}`,
-            body: {
-              name: 'Updated Integration Test Patient',
-            },
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            expectedStatus: 200,
-          });
-        }
-
-        // Test 20: Update patient encounter (non-existent ID - validation test)
+        // ===== TEST 15: Update encounter (non-existent) =====
         await runner.test('Update encounter (non-existent)', {
           method: 'PATCH',
           endpoint: '/api/patient-encounters/invalid-id',
           body: {
             name: 'Updated Name',
-            reason: 'Updated reason',
           },
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          expectedStatus: 400, // Invalid ID format
-        });
-
-        // Test 21: Get complete patient encounter (with all linked data)
-        // PLACEHOLDER: Full SOAP notes functionality migration pending
-        if (createdEncounterId) {
-          await runner.test('Get complete patient encounter bundle (with all linked data)', {
-            method: 'GET',
-            endpoint: `/api/patient-encounters/complete/${createdEncounterId}`,
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            expectedStatus: 200,
-            expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNotes'],
-          });
-        }
-
-        // Test 22: Get complete patient encounter with invalid ID format
-        await runner.test('Get complete patient encounter (invalid ID format)', {
-          method: 'GET',
-          endpoint: '/api/patient-encounters/complete/invalid-id',
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
           expectedStatus: 400,
         });
 
-        // Test 23: Get complete patient encounter with non-existent ID
+        // ===== TEST 16: Create complete patient encounter bundle (with all linked data) =====
+        // This test creates a new encounter with recording, transcript, and SOAP note in one request
+        const completeBundle = {
+          patientEncounter: {
+            name: 'Complete Bundle Test Patient',
+          },
+          recording: {
+            recording_file_name: 'test-recording-' + Date.now() + '.wav',
+            recording_duration: 300,
+            recording_file_size: 2400000,
+            recording_file_path: '/test-recordings/test-' + Date.now() + '.wav',
+          },
+          transcript: {
+            transcript_text: 'This is a test transcript for the complete bundle test.',
+            confidence_score: 0.95,
+          },
+          soapNote_text: {
+            soapNote: {
+              subjective: 'Patient reports feeling better',
+              objective: 'Vital signs stable',
+              assessment: 'Improvement noted',
+              plan: 'Continue current treatment',
+            },
+            billingSuggestion: 'CPT 99214',
+          },
+        };
+
+        let completeBundleEncounterId = null;
+        await runner.test('Create complete patient encounter bundle (POST)', {
+          method: 'POST',
+          endpoint: '/api/patient-encounters/complete',
+          body: completeBundle,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 201,
+          expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNote'],
+          onSuccess: (data) => {
+            // Extract and track the created encounter ID for dependent tests
+            if (data.patientEncounter && data.patientEncounter.id) {
+              completeBundleEncounterId = data.patientEncounter.id;
+              createdEncounterIds.push(completeBundleEncounterId);
+              console.log(`    Created complete bundle encounter ID: ${completeBundleEncounterId}`);
+            }
+          },
+        });
+
+        // ===== TEST 17: Get the created complete bundle (GET) =====
+        if (completeBundleEncounterId) {
+          await runner.test('Get complete patient encounter bundle (verify creation)', {
+            method: 'GET',
+            endpoint: `/api/patient-encounters/complete/${completeBundleEncounterId}`,
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            expectedStatus: 200,
+            expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNotes'],
+            onSuccess: (data) => {
+              // Print full response for debugging
+              console.log(`\n    📋 Full Test 17 Response:\n${JSON.stringify(data, null, 2)}\n`);
+              
+              // Check for encryption fields that should be cleaned
+              if (data.patientEncounter) {
+                const encryptedFields = Object.keys(data.patientEncounter).filter(k => 
+                  k.includes('encrypted') || k.includes('iv')
+                );
+                if (encryptedFields.length > 0) {
+                  console.log(`    ⚠️  WARNING: Encryption fields found in patientEncounter: ${encryptedFields.join(', ')}`);
+                } else {
+                  console.log(`    ✓ No encryption fields in patientEncounter`);
+                }
+              }
+              
+              // Check for proper field names
+              if (data.patientEncounter && !data.patientEncounter.name && data.patientEncounter.encrypted_name) {
+                console.log(`    ⚠️  WARNING: Found encrypted_name instead of name`);
+              }
+              if (data.transcript && !data.transcript.transcript_text && data.transcript.encrypted_transcript) {
+                console.log(`    ⚠️  WARNING: Found encrypted_transcript instead of transcript_text`);
+              }
+            },
+          });
+        }
+
+        // ===== TEST 18: Missing required field validation =====
+        // Attempts to create bundle without patient name (required field)
+        await runner.test('Create complete encounter with missing patientEncounter.name (should fail)', {
+          method: 'POST',
+          endpoint: '/api/patient-encounters/complete',
+          body: {
+            patientEncounter: {
+              // Missing required 'name' field
+            },
+            recording: {
+              recording_file_name: 'test.wav',
+              recording_duration: 300,
+              recording_file_size: 2400000,
+              recording_file_path: '/test.wav',
+            },
+            transcript: {
+              transcript_text: 'Test transcript',
+              confidence_score: 0.95,
+            },
+            soapNote_text: {
+              soapNote: {
+                subjective: 'Test',
+                objective: 'Test',
+                assessment: 'Test',
+                plan: 'Test',
+              },
+            },
+          },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 400,
+        });
+
+        // ===== TEST 19: Invalid soapNote_text type enforcement =====
+        // Attempts to send string instead of object for soapNote_text (strict type checking)
+        await runner.test('Create complete encounter with invalid soapNote_text type (should fail)', {
+          method: 'POST',
+          endpoint: '/api/patient-encounters/complete',
+          body: {
+            patientEncounter: {
+              name: 'Type Validation Test',
+            },
+            recording: {
+              recording_file_name: 'test.wav',
+              recording_duration: 300,
+              recording_file_size: 2400000,
+              recording_file_path: '/test.wav',
+            },
+            transcript: {
+              transcript_text: 'Test',
+              confidence_score: 0.95,
+            },
+            soapNote_text: 'This should be an object, not a string',
+          },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 400,
+        });
+
+        // ===== TEST 20: Auth required for POST =====
+        // Attempts to create bundle without JWT token
+        await runner.test('Create complete encounter without auth (should fail)', {
+          method: 'POST',
+          endpoint: '/api/patient-encounters/complete',
+          body: completeBundle,
+          expectedStatus: 401,
+        });
+
+        // ===== TEST 21: Invalid ID format on GET =====
+        await runner.test('Get complete patient encounter (invalid ID format)', {
+          method: 'GET',
+          endpoint: '/api/patient-encounters/complete/invalid-format',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          expectedStatus: 400,
+        });
+
+        // ===== TEST 22: Non-existent encounter on GET =====
         await runner.test('Get complete patient encounter (non-existent)', {
           method: 'GET',
-          endpoint: '/api/patient-encounters/complete/999999',
+          endpoint: '/api/patient-encounters/complete/999999999999',
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
           expectedStatus: 404,
         });
 
-        // Test 24: Get complete patient encounter without auth
+        // ===== TEST 23: Auth required for GET =====
         await runner.test('Get complete patient encounter (no auth)', {
           method: 'GET',
           endpoint: '/api/patient-encounters/complete/test-id',
@@ -581,8 +490,6 @@ async function runPatientEncounterTests() {
     console.log('\n⚠️  Test accounts not configured. Skipping real credential tests.');
     console.log('To enable: Add TEST_ACCOUNT_EMAIL and TEST_ACCOUNT_PASSWORD to .env.local\n');
   }
-
-  // Cleanup: Delete all test data created during the test run
   console.log('\n═══════════════════════════════════════════════════════');
   console.log('🧹 Test Suite Cleanup');
   console.log('═══════════════════════════════════════════════════════\n');

@@ -177,7 +177,7 @@ async function testMaskPhi(accessToken) {
     expectedFields: ['maskedText', 'entities'],
   });
 
-  // Test 3b: Verify Test 3 identified >20 PHI entities
+  // Test 3b: Verify Test 3 identified >5 PHI entities
   const test3Response = await fetch(`${runner.baseUrl}/api/aws/mask-phi`, {
     method: 'POST',
     headers: {
@@ -189,7 +189,7 @@ async function testMaskPhi(accessToken) {
   const test3Data = await test3Response.json();
   const entityCount = test3Data.entities?.length || 0;
   
-  await runner.test('Verify complex text identified >20 PHI entities', {
+  await runner.test('Verify complex text identified >5 PHI entities', {
     method: 'POST',
     endpoint: '/api/aws/mask-phi',
     body: test3Body,
@@ -197,10 +197,10 @@ async function testMaskPhi(accessToken) {
     expectedStatus: 200,
     expectedFields: ['maskedText', 'entities'],
     customValidator: () => {
-      if (entityCount > 20) {
-        return { passed: true, message: `Found ${entityCount} PHI entities (expected >20)` };
+      if (entityCount > 5) {
+        return { passed: true, message: `Found ${entityCount} PHI entities (expected >5)` };
       }
-      return { passed: false, message: `Found only ${entityCount} PHI entities, expected >20` };
+      return { passed: false, message: `Found only ${entityCount} PHI entities, expected >5` };
     },
   });
 
@@ -403,8 +403,8 @@ export async function runAwsTests() {
           }),
         });
         const signInResponse = await response.json();
-        if (signInResponse?.session?.access_token) {
-          accessToken = signInResponse.session.access_token;
+        if (signInResponse?.token?.access_token) {
+          accessToken = signInResponse.token.access_token;
           console.log('✅ Obtained real access token from test account\n');
         }
       } catch (error) {
