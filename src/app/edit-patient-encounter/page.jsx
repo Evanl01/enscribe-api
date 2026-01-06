@@ -273,14 +273,13 @@ function EditPatientEncounterInner() {
         assessment: soapAssessment.replace(/\r?\n/g, "\n"),
         plan: soapPlan.replace(/\r?\n/g, "\n"),
       };
-      const response = await fetch("/api/soap-notes", {
+      const response = await fetch(`/api/soap-notes/${id}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          id: id,
           soapNote_text: {
             soapNote: soapNoteObject,
             billingSuggestion,

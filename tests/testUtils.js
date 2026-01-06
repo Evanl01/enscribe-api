@@ -56,7 +56,7 @@ export class TestRunner {
    * Add a test case
    */
   async test(name, config) {
-    const { method, endpoint, body, headers, expectedStatus, expectedFields, customValidator } = config;
+    const { method, endpoint, body, headers, expectedStatus, expectedFields, customValidator, onSuccess } = config;
 
     const url = `${this.baseUrl}${endpoint}`;
     const response = await makeRequest(method, url, { body, headers, expectedStatus });
@@ -97,6 +97,16 @@ export class TestRunner {
     };
 
     this.results.push(result);
+
+    // Call onSuccess callback if test passed and callback provided
+    if (passed && onSuccess && typeof onSuccess === 'function') {
+      try {
+        onSuccess(response.body);
+      } catch (error) {
+        console.error(`Error in onSuccess callback for test "${name}":`, error.message);
+      }
+    }
+
     return result;
   }
 

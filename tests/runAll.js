@@ -9,6 +9,7 @@ import { runDotPhrasesTests } from './dot-phrases.test.js';
 import { runPatientEncounterTests } from './patient-encounters.test.js';
 import { runRecordingsTests } from './recordings.test.js';
 import { runTranscriptsTests } from './transcripts.test.js';
+import { runSoapNotesTests } from './soap-notes.test.js';
 import { runAwsTests } from './aws.test.js';
 import { runGcpTests } from './gcp.test.js';
 
@@ -148,10 +149,29 @@ async function runAllTests() {
     results.push({ suite: 'Transcripts', status: 'failed', error: error.message });
   }
 
+  // Run SOAP Notes Tests
+  try {
+    console.log('\n' + '-'.repeat(70));
+    console.log('TEST SUITE 7: SOAP NOTES API');
+    console.log('-'.repeat(70) + '\n');
+    const soapResult = await runSoapNotesTests();
+    results.push({ 
+      suite: 'SOAP Notes', 
+      status: 'completed',
+      tests: soapResult?.total || 0,
+      passed: soapResult?.passed || 0,
+      failed: soapResult?.failed || 0,
+      passRate: soapResult?.passRate || '0%'
+    });
+  } catch (error) {
+    console.error('❌ SOAP Notes tests failed:', error.message);
+    results.push({ suite: 'SOAP Notes', status: 'failed', error: error.message });
+  }
+
   // Run GCP Tests
   try {
     console.log('\n' + '-'.repeat(70));
-    console.log('TEST SUITE 7: GCP TRANSCRIPTION PIPELINE');
+    console.log('TEST SUITE 8: GCP TRANSCRIPTION PIPELINE');
     console.log('-'.repeat(70) + '\n');
     const gcpResult = await runGcpTests();
     results.push({ 

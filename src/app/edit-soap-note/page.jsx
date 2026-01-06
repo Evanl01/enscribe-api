@@ -44,7 +44,7 @@ function EditSoapNoteInner() {
     const fetchData = async () => {
       try {
         // 1. Fetch soapNote by id
-        const soapNoteRes = await fetch(`/api/soap-notes?id=${soapNoteId}`, {
+        const soapNoteRes = await fetch(`/api/soap-notes/${soapNoteId}`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${api.getJWT()}`,
@@ -197,14 +197,13 @@ function EditSoapNoteInner() {
       };
 
       const payload = {
-        id: soapNoteId,
         soapNote_text: {
           soapNote: soapNoteObject,
           billingSuggestion,
         },
       };
       console.log("Saving SOAP note:", payload);
-      const response = await fetch("/api/soap-notes", {
+      const response = await fetch(`/api/soap-notes/${soapNoteId}`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${api.getJWT()}`,

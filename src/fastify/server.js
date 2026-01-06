@@ -16,6 +16,7 @@ import dotPhrasesRoutes from './routes/dot-phrases.js';
 import patientEncountersRoutes from './routes/patientEncounters.js';
 import { registerRecordingsRoutes } from './routes/recordings.js';
 import { registerTranscriptsRoutes } from './routes/transcripts.js';
+import { registerSoapNotesRoutes } from './routes/soapNotes.js';
 import { registerMaskPhiRoutes } from './routes/maskPhi.routes.js';
 import { registerTranscribeRoutes } from './routes/transcribe.routes.js';
 
@@ -79,6 +80,7 @@ async function createFastifyApp(options = {}) {
     await apiScope.register(patientEncountersRoutes);
     await registerRecordingsRoutes(apiScope);
     await registerTranscriptsRoutes(apiScope);
+    await registerSoapNotesRoutes(apiScope);
     await registerMaskPhiRoutes(apiScope);
     await registerTranscribeRoutes(apiScope);
   }, { prefix: '/api' });

@@ -8,6 +8,14 @@ import * as validation from "@/public/scripts/validation.js";
 import parseSoapNotes from "@/src/utils/parseSoapNotes";
 import Auth from "@/src/components/Auth";
 
+// Pagination constants for SOAP notes queries
+const SOAP_NOTES_PAGINATION = {
+  limit: 100,
+  offset: 0,
+  sortBy: 'updated_at',
+  order: 'desc',
+};
+
 const Dashboard = () => {
   const router = useRouter();
   const [transcripts, setTranscripts] = useState({});
@@ -143,7 +151,8 @@ const Dashboard = () => {
     }
 
     try {
-      const response = await fetch("/api/soap-notes/batch", {
+      const queryParams = new URLSearchParams(SOAP_NOTES_PAGINATION).toString();
+      const response = await fetch(`/api/soap-notes?${queryParams}`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${jwt}`,

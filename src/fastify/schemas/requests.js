@@ -12,6 +12,35 @@ export const patientEncounterCreateRequestSchema = z.object({
 });
 
 /**
+ * POST request for creating a complete patient encounter bundle
+ * Endpoint: POST /api/patient-encounters/complete
+ * Requires patientEncounter, recording, transcript, and soapNote_text objects
+ */
+export const patientEncounterCompleteCreateRequestSchema = z.object({
+  patientEncounter: z.object({
+    name: z.string().min(1, 'Patient encounter name is required'),
+    recording_file_path: z.string().min(1, 'Recording file path is required'),
+    recording_file_signed_url: z.string().nullable().optional(),
+    recording_file_signed_url_expiry: z.string().regex(isoDatetimeRegex, 'Invalid ISO datetime').nullable().optional(),
+  }),
+  recording: z.object({
+    recording_file_path: z.string().min(1, 'Recording file path is required'),
+  }),
+  transcript: z.object({
+    transcript_text: z.string().min(1, 'Transcript text is required'),
+  }),
+  soapNote_text: z.object({
+    soapNote: z.object({
+      subjective: z.string().optional().default(''),
+      objective: z.string().optional().default(''),
+      assessment: z.string().optional().default(''),
+      plan: z.string().optional().default(''),
+    }).optional(),
+    billingSuggestion: z.string().optional().default(''),
+  }),
+});
+
+/**
  * PATCH request for patient encounter - only updates the encounter itself (e.g., name)
  * Use PATCH /api/patient-encounters/{id}/update-with-transcript for compound updates
  */
@@ -61,5 +90,39 @@ export const transcriptCreateRequestSchema = z.object({
  */
 export const transcriptUpdateRequestSchema = z.object({
   transcript_text: z.string().min(1, 'Transcript text is required'),
+});
+
+/**
+ * POST request for creating a SOAP note
+ * Endpoint: POST /api/soap-notes
+ */
+export const soapNoteCreateRequestSchema = z.object({
+  patientEncounter_id: z.number().int('Patient Encounter ID must be an integer'),
+  soapNote_text: z.object({
+    soapNote: z.object({
+      subjective: z.string().optional().default(''),
+      objective: z.string().optional().default(''),
+      assessment: z.string().optional().default(''),
+      plan: z.string().optional().default(''),
+    }).optional(),
+    billingSuggestion: z.string().optional().default(''),
+  }),
+});
+
+/**
+ * PATCH request for updating a SOAP note
+ * Endpoint: PATCH /api/soap-notes/:id
+ * Note: ID is in URL path, not in request body
+ */
+export const soapNoteUpdateRequestSchema = z.object({
+  soapNote_text: z.object({
+    soapNote: z.object({
+      subjective: z.string().optional().default(''),
+      objective: z.string().optional().default(''),
+      assessment: z.string().optional().default(''),
+      plan: z.string().optional().default(''),
+    }).optional(),
+    billingSuggestion: z.string().optional().default(''),
+  }),
 });
 

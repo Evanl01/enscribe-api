@@ -18,6 +18,7 @@
     "test:setup": "node tests/setup.test.js",
     "test:recordings": "node tests/recordings.test.js --all",
     "test:transcripts": "node tests/transcripts.test.js",
+    "test:soap-notes": "node tests/soap-notes.test.js",
     "test:gcp": "node tests/gcp.test.js",
     "test:teardown": "node tests/teardown.test.js"
   },

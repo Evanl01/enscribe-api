@@ -7,6 +7,7 @@ Complete API documentation for frontend developers integrating with the Enscribe
 - [Authentication API](#authentication-api)
 - [Patient Encounters API](#patient-encounters-api)
 - [Dot Phrases API](#dot-phrases-api)
+- [SOAP Notes API](#soap-notes-api)
 - [GCP Transcription API](#gcp-transcription-api)
 - [Status Codes Reference](#status-codes-reference)
 - [Error Handling](#error-handling)
@@ -1052,6 +1053,314 @@ export function PatientEncounterForm({ accessToken }) {
   );
 }
 ```
+
+---
+
+## SOAP Notes API
+
+### Overview
+
+The SOAP Notes API provides endpoints to manage SOAP (Subjective, Objective, Assessment, Plan) notes associated with patient encounters. SOAP notes are encrypted at rest using AES-256 encryption with keys stored per patient encounter. All endpoints require authentication via JWT bearer token in the Authorization header.
+
+**Base Path:** `/api/soap-notes`
+
+**Authentication:** Bearer token required (Supabase JWT)
+
+**Encryption:** All `soapNote_text` fields are encrypted before storage and decrypted on retrieval. The `iv` (initialization vector) is stored alongside the encrypted data.
+
+---
+
+### Endpoints
+
+#### GET /api/soap-notes
+
+Retrieve all SOAP notes with pagination support.
+
+**Query Parameters:**
+- `limit` (number, default: 100) - Maximum number of records to return
+- `offset` (number, default: 0) - Number of records to skip
+- `sortBy` (string, default: 'created_at') - Field to sort by ('created_at' or 'updated_at')
+- `order` (string, default: 'desc') - Sort order ('asc' or 'desc')
+
+**Request Example:**
+```
+GET /api/soap-notes?limit=10&offset=0&sortBy=created_at&order=desc
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response Example (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "123456789",
+      "patientEncounter_id": "987654321",
+      "user_id": "user-uuid-123",
+      "soapNote_text": {
+        "soapNote": {
+          "subjective": "Patient reports headache for 3 days...",
+          "objective": "Vital signs normal, examination shows...",
+          "assessment": "Probable tension headache",
+          "plan": "Recommend rest, follow-up in 1 week"
+        },
+        "billingSuggestion": "ICD-10: G89.29 - Other chronic pain"
+      },
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 45,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+**Status Codes:**
+- `200 OK` - Successfully retrieved SOAP notes
+- `401 Unauthorized` - Missing or invalid authentication token
+- `403 Forbidden` - User lacks permission to view these records
+
+---
+
+#### GET /api/soap-notes/:id
+
+Retrieve a single SOAP note by ID.
+
+**Path Parameters:**
+- `id` (string, required) - Numeric ID of the SOAP note to retrieve
+
+**Request Example:**
+```
+GET /api/soap-notes/123456789
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response Example (200 OK):**
+```json
+{
+  "id": "123456789",
+  "patientEncounter_id": "987654321",
+  "user_id": "user-uuid-123",
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient reports headache for 3 days...",
+      "objective": "Vital signs normal, examination shows...",
+      "assessment": "Probable tension headache",
+      "plan": "Recommend rest, follow-up in 1 week"
+    },
+    "billingSuggestion": "ICD-10: G89.29 - Other chronic pain"
+  },
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Status Codes:**
+- `200 OK` - Successfully retrieved SOAP note
+- `401 Unauthorized` - Missing or invalid authentication token
+- `404 Not Found` - SOAP note does not exist or user has no access
+- `400 Bad Request` - Invalid ID format
+
+---
+
+#### POST /api/soap-notes
+
+Create a new SOAP note for a patient encounter.
+
+**Request Body:**
+```json
+{
+  "patientEncounter_id": "987654321",
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient reports...",
+      "objective": "Examination findings...",
+      "assessment": "Clinical assessment...",
+      "plan": "Treatment plan..."
+    },
+    "billingSuggestion": "ICD-10 code suggestion (optional)"
+  }
+}
+```
+
+**Request Example:**
+```
+POST /api/soap-notes
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+
+{
+  "patientEncounter_id": "987654321",
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient presents with acute cough",
+      "objective": "Temperature 101.2°F, chest auscultation shows wheezing",
+      "assessment": "Community-acquired pneumonia",
+      "plan": "Prescribe antibiotics, chest X-ray, follow-up in 3 days"
+    },
+    "billingSuggestion": "ICD-10: J15.9"
+  }
+}
+```
+
+**Response Example (201 Created):**
+```json
+{
+  "id": "123456789",
+  "patientEncounter_id": "987654321",
+  "user_id": "user-uuid-123",
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient presents with acute cough",
+      "objective": "Temperature 101.2°F, chest auscultation shows wheezing",
+      "assessment": "Community-acquired pneumonia",
+      "plan": "Prescribe antibiotics, chest X-ray, follow-up in 3 days"
+    },
+    "billingSuggestion": "ICD-10: J15.9"
+  },
+  "created_at": "2024-01-15T11:45:00Z",
+  "updated_at": "2024-01-15T11:45:00Z"
+}
+```
+
+**Status Codes:**
+- `201 Created` - SOAP note successfully created
+- `400 Bad Request` - Invalid request body or missing required fields
+- `401 Unauthorized` - Missing or invalid authentication token
+- `404 Not Found` - Referenced patient encounter does not exist
+- `403 Forbidden` - User does not own the patient encounter
+
+---
+
+#### PATCH /api/soap-notes/:id
+
+Update an existing SOAP note.
+
+**Path Parameters:**
+- `id` (string, required) - Numeric ID of the SOAP note to update
+
+**Request Body:**
+```json
+{
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Updated subjective findings...",
+      "objective": "Updated objective findings...",
+      "assessment": "Updated assessment...",
+      "plan": "Updated plan..."
+    },
+    "billingSuggestion": "Updated ICD-10 code (optional)"
+  }
+}
+```
+
+**Request Example:**
+```
+PATCH /api/soap-notes/123456789
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+
+{
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient reports improvement after initial treatment",
+      "objective": "Temperature now 99.1°F, wheezing decreased",
+      "assessment": "Community-acquired pneumonia - improving",
+      "plan": "Continue antibiotics, re-evaluation in 5 days"
+    },
+    "billingSuggestion": "ICD-10: J15.9"
+  }
+}
+```
+
+**Response Example (200 OK):**
+```json
+{
+  "id": "123456789",
+  "patientEncounter_id": "987654321",
+  "user_id": "user-uuid-123",
+  "soapNote_text": {
+    "soapNote": {
+      "subjective": "Patient reports improvement after initial treatment",
+      "objective": "Temperature now 99.1°F, wheezing decreased",
+      "assessment": "Community-acquired pneumonia - improving",
+      "plan": "Continue antibiotics, re-evaluation in 5 days"
+    },
+    "billingSuggestion": "ICD-10: J15.9"
+  },
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T12:00:00Z"
+}
+```
+
+**Status Codes:**
+- `200 OK` - SOAP note successfully updated
+- `400 Bad Request` - Invalid request body or ID format
+- `401 Unauthorized` - Missing or invalid authentication token
+- `404 Not Found` - SOAP note does not exist
+- `403 Forbidden` - User does not own this SOAP note
+
+---
+
+#### DELETE /api/soap-notes/:id
+
+Delete a SOAP note.
+
+**Path Parameters:**
+- `id` (string, required) - Numeric ID of the SOAP note to delete
+
+**Request Example:**
+```
+DELETE /api/soap-notes/123456789
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response Example (204 No Content):**
+```
+(Empty body on successful deletion)
+```
+
+**Status Codes:**
+- `204 No Content` - SOAP note successfully deleted
+- `400 Bad Request` - Invalid ID format
+- `401 Unauthorized` - Missing or invalid authentication token
+- `404 Not Found` - SOAP note does not exist
+- `403 Forbidden` - User does not own this SOAP note
+
+---
+
+### Error Response Format
+
+All error responses follow this format:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": "Invalid request body"
+}
+```
+
+**Common Error Messages:**
+- `"Missing or invalid authentication token"` - No valid JWT in Authorization header
+- `"Invalid request body"` - Request doesn't match schema validation
+- `"User does not own this resource"` - User lacks permission to access/modify record
+- `"Resource not found"` - Record doesn't exist or is not accessible to user
+- `"Invalid ID format"` - ID is not a valid numeric string
+
+---
+
+### Encryption Details
+
+**Field:** `soapNote_text`
+
+- **Encryption Method:** AES-256-GCM
+- **Key Source:** Stored per patient encounter (`patientEncounters.encrypted_aes_key`)
+- **Storage Format:** Two columns in database:
+  - `encrypted_soapNote_text`: The encrypted JSON payload
+  - `iv`: Initialization vector for decryption
+- **Decryption:** Automatic on GET requests; client receives decrypted plain text
+- **Encryption:** Automatic on POST/PATCH requests; server encrypts before storing
 
 ---
 

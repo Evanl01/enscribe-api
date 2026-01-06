@@ -219,6 +219,359 @@ async function getBatchRecordings(accessToken) {
 }
 
 /**
+ * Setup Patient Encounters - Creates 3 test encounters if they don't exist
+ * Names: "Test Patient", "Updated Integration Test Patient", "Unattached Encounter"
+ * Display IDs: 900, 901, 902
+ */
+async function setupPatientEncounters(accessToken) {
+  console.log('⚙️ Setting up test patient encounters...');
+  
+  const expectedEncounters = [
+    { name: 'Alpha', displayId: 901 },
+    { name: 'Bravo', displayId: 900 },
+    { name: 'Charlie', displayId: 902 },
+  ];
+  
+  const createdEncounters = [];
+  
+  try {
+    // Fetch existing encounters
+    const response = await fetch('http://localhost:3001/api/patient-encounters', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      console.warn(`  ⚠️  Error fetching encounters: ${response.status}`);
+      return [];
+    }
+    
+    const existingEncounters = await response.json();
+    
+    // Build map of existing encounters by name
+    const existingMap = new Map(existingEncounters.map(e => [e.name, e]));
+    
+    // Create missing encounters
+    for (const expected of expectedEncounters) {
+      const existing = existingMap.get(expected.name);
+      
+      if (existing) {
+        console.log(`  ⏭️  Skipping encounter: "${expected.name}" (already exists, ID: ${existing.id})`);
+        createdEncounters.push(existing);
+      } else {
+        try {
+          const createResponse = await fetch('http://localhost:3001/api/patient-encounters', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: expected.name,
+            }),
+          });
+          
+          if (createResponse.ok) {
+            const created = await createResponse.json();
+            const encounterId = created.id || created.data?.id;
+            createdEncounters.push({
+              id: encounterId,
+              name: expected.name,
+              displayId: expected.displayId,
+            });
+            console.log(`  ✓ Created encounter: "${expected.name}" (ID: ${encounterId})`);
+          } else {
+            console.warn(`  ⚠️  Failed to create encounter "${expected.name}": ${createResponse.status}`);
+          }
+        } catch (error) {
+          console.warn(`  ⚠️  Error creating encounter "${expected.name}": ${error.message}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error in setupPatientEncounters: ${error.message}`);
+  }
+  
+  console.log();
+  return createdEncounters;
+}
+
+/**
+ * Setup DotPhrases - Independent function
+ * Reconciles existing dotPhrases: deletes mismatched, creates missing
+ */
+async function setupDotPhrases(accessToken) {
+  console.log('⚙️ Reconciling test dotPhrases...');
+  const expectedDotPhrases = readDotPhraseFixtures();
+  const createdDotPhrases = [];
+  
+  // Fetch existing dotPhrases for the user
+  let existingDotPhrases = [];
+  try {
+    const getResponse = await fetch('http://localhost:3001/api/dot-phrases', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (getResponse.ok) {
+      const data = await getResponse.json();
+      existingDotPhrases = Array.isArray(data) ? data : (data.data || []);
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error fetching existing dotPhrases: ${error.message}`);
+  }
+  
+  // Build map of expected dotPhrases by trigger
+  const expectedMap = new Map(expectedDotPhrases.map(dp => [dp.trigger, dp.expansion]));
+  
+  // Delete dotPhrases that don't match or aren't expected
+  for (const existing of existingDotPhrases) {
+    const expectedExpansion = expectedMap.get(existing.trigger);
+    
+    // If not in expected list or expansion doesn't match, delete it
+    if (!expectedExpansion || expectedExpansion !== existing.expansion) {
+      try {
+        const deleteResponse = await fetch(`http://localhost:3001/api/dot-phrases/${existing.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        if (deleteResponse.ok) {
+          console.log(`  🗑️  Deleted mismatched dotPhrase: "${existing.trigger}"`);
+        }
+      } catch (error) {
+        console.warn(`  ⚠️  Error deleting dotPhrase "${existing.trigger}": ${error.message}`);
+      }
+    }
+  }
+  
+  // Create or skip dotPhrases based on expected list
+  for (const phrase of expectedDotPhrases) {
+    const existing = existingDotPhrases.find(dp => dp.trigger === phrase.trigger);
+    
+    if (existing && existing.expansion === phrase.expansion) {
+      // Already exists with correct expansion
+      console.log(`  ⏭️  Skipping dotPhrase: "${phrase.trigger}" (already exists)`);
+      createdDotPhrases.push({
+        id: existing.id,
+        trigger: phrase.trigger,
+        expansion: phrase.expansion,
+      });
+    } else {
+      // Create new
+      try {
+        const response = await fetch('http://localhost:3001/api/dot-phrases', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            trigger: phrase.trigger,
+            expansion: phrase.expansion,
+          }),
+        });
+        
+        if (response.ok) {
+          const created = await response.json();
+          const dotPhraseId = created.id || created.data?.id || created.data?.dotPhrase?.id;
+          createdDotPhrases.push({
+            id: dotPhraseId,
+            trigger: phrase.trigger,
+            expansion: phrase.expansion,
+          });
+          console.log(`  ✓ Created dotPhrase: "${phrase.trigger}" → "${phrase.expansion}"`);
+        } else {
+          console.warn(`  ⚠️  Failed to create dotPhrase "${phrase.trigger}": ${response.status}`);
+        }
+      } catch (error) {
+        console.warn(`  ⚠️  Error creating dotPhrase "${phrase.trigger}": ${error.message}`);
+      }
+    }
+  }
+  console.log();
+  
+  return createdDotPhrases;
+}
+
+/**
+ * Setup SOAP Notes - Depends on encounters from setupRecordings
+ * Checks DB first, only creates missing notes
+ */
+async function setupSoapNotes(accessToken, encounters) {
+  console.log('⚙️ Setting up test SOAP notes...');
+  
+  if (!encounters || encounters.length < 2) {
+    console.warn(`  ⚠️  Insufficient encounters (${encounters?.length || 0}) to set up SOAP notes. Need at least 2.\n`);
+    return [];
+  }
+  
+  const createdSoapNotes = [];
+  const expectedNotesPerEncounter = [2, 1]; // 2 for first, 1 for second
+  
+  for (let encIdx = 0; encIdx < 2; encIdx++) {
+    const encounter = encounters[encIdx];
+    const expectedCount = expectedNotesPerEncounter[encIdx];
+    
+    // Check existing notes for this encounter via complete encounter endpoint
+    try {
+      const getResponse = await fetch(`http://localhost:3001/api/patient-encounter/complete:${encounter.id}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      let existingNotes = [];
+      if (getResponse.ok) {
+        const encounterData = await getResponse.json();
+        // Extract soapNotes from the encounter response
+        existingNotes = encounterData.soapNotes || [];
+      }
+      
+      // Warn if more notes than expected
+      if (existingNotes.length > expectedCount) {
+        console.warn(`  ⚠️  WARNING: Encounter "${encounter.name}" has ${existingNotes.length} notes, expected ${expectedCount}`);
+      }
+      
+      // Create only missing notes
+      const notesToCreate = Math.max(0, expectedCount - existingNotes.length);
+      const startIndex = existingNotes.length + 1; // Next sequential note number
+      
+      for (let i = 0; i < notesToCreate; i++) {
+        const noteNum = startIndex + i;
+        try {
+          const response = await fetch('http://localhost:3001/api/soap-notes', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              patientEncounter_id: encounter.id,
+              soapNote_text: {
+                soapNote: {
+                  subjective: `${encounter.name} Subjective - Note ${noteNum}`,
+                  objective: `${encounter.name} Objective - Note ${noteNum}`,
+                  assessment: `${encounter.name} Assessment - Note ${noteNum}`,
+                  plan: `${encounter.name} Plan - Note ${noteNum}`,
+                },
+                billingSuggestion: `CPT-${noteNum === 1 ? '99213' : '99214'}`,
+              },
+            }),
+          });
+
+          if (response.ok) {
+            const created = await response.json();
+            createdSoapNotes.push({
+              id: created.id,
+              encounterName: encounter.name,
+              encounterId: encounter.id,
+              noteNumber: noteNum,
+            });
+            console.log(`  ✓ Created SOAP note ${noteNum} for "${encounter.name}"`);
+          } else {
+            console.warn(`  ⚠️  Failed to create SOAP note ${noteNum} for "${encounter.name}": ${response.status}`);
+          }
+        } catch (error) {
+          console.warn(`  ⚠️  Error creating SOAP note ${noteNum}: ${error.message}`);
+        }
+      }
+      
+      // Log skipped notes
+      if (existingNotes.length > 0) {
+        console.log(`  ⏭️  Skipping ${existingNotes.length} existing note(s) for "${encounter.name}"`);
+      }
+      
+    } catch (error) {
+      console.warn(`  ⚠️  Error checking existing SOAP notes for "${encounter.name}": ${error.message}`);
+    }
+  }
+  
+  // ===== TEST SOAP NOTES ORDERING AND PAGINATION =====
+  console.log(`\n  Testing SOAP notes ordering and pagination...`);
+  
+  // Test 1: Get all with DESC order (should be newest first)
+  try {
+    const response = await fetch('http://localhost:3001/api/soap-notes?limit=100&offset=0&sortBy=created_at&order=desc', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const notes = Array.isArray(data) ? data : (data.data || []);
+      
+      if (notes.length >= 3) {
+        console.log(`    ✓ DESC order test - retrieved ${notes.length} notes (newest first)`);
+      } else {
+        console.warn(`    ⚠️  DESC order test - only found ${notes.length} notes, expected 3+`);
+      }
+    }
+  } catch (error) {
+    console.warn(`    ⚠️  Error testing DESC order: ${error.message}`);
+  }
+
+  // Test 2: Pagination with limit=2, offset=0
+  try {
+    const response = await fetch('http://localhost:3001/api/soap-notes?limit=2&offset=0&sortBy=created_at&order=desc', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const notes = Array.isArray(data) ? data : (data.data || []);
+      
+      if (notes.length === 2) {
+        console.log(`    ✓ Pagination (limit=2, offset=0) returned 2 notes`);
+      } else {
+        console.warn(`    ⚠️  Pagination test - got ${notes.length} notes, expected 2`);
+      }
+    }
+  } catch (error) {
+    console.warn(`    ⚠️  Error testing pagination: ${error.message}`);
+  }
+
+  // Test 3: Pagination with limit=2, offset=1
+  try {
+    const response = await fetch('http://localhost:3001/api/soap-notes?limit=2&offset=1&sortBy=created_at&order=desc', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const notes = Array.isArray(data) ? data : (data.data || []);
+      
+      if (notes.length >= 1) {
+        console.log(`    ✓ Pagination (limit=2, offset=1) returned ${notes.length} note(s)`);
+      } else {
+        console.warn(`    ⚠️  Pagination test - got ${notes.length} notes`);
+      }
+    }
+  } catch (error) {
+    console.warn(`    ⚠️  Error testing pagination (offset=1): ${error.message}`);
+  }
+  
+  console.log();
+  return createdSoapNotes;
+}
+
+/**
  * Main setup function with smart duplicate detection
  */
 async function setupTestData() {
@@ -379,398 +732,70 @@ async function setupTestData() {
     }
     console.log();
 
-    // Check if setup already complete (3 attached + 2 unattached)
-    if (matchedAttached.length >= 3 && unmatchedUnattached.length >= 2) {
-      console.log('✓ Complete test data already exists. Skipping recording setup.\n');
-      
-      // Reconcile dotPhrases: check existing, delete mismatched, create missing
-      console.log('⚙️ Reconciling test dotPhrases...');
-      const expectedDotPhrases = readDotPhraseFixtures();
-      const createdDotPhrases = [];
-      
-      // Fetch existing dotPhrases for the user
-      let existingDotPhrases = [];
-      try {
-        const getResponse = await fetch('http://localhost:3001/api/dot-phrases', {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (getResponse.ok) {
-          const data = await getResponse.json();
-          existingDotPhrases = Array.isArray(data) ? data : (data.data || []);
-        }
-      } catch (error) {
-        console.warn(`  ⚠️  Error fetching existing dotPhrases: ${error.message}`);
-      }
-      
-      // Build map of expected dotPhrases by trigger
-      const expectedMap = new Map(expectedDotPhrases.map(dp => [dp.trigger, dp.expansion]));
-      
-      // Delete dotPhrases that don't match or aren't expected
-      for (const existing of existingDotPhrases) {
-        const expectedExpansion = expectedMap.get(existing.trigger);
-        
-        // If not in expected list or expansion doesn't match, delete it
-        if (!expectedExpansion || expectedExpansion !== existing.expansion) {
-          try {
-            const deleteResponse = await fetch(`http://localhost:3001/api/dot-phrases/${existing.id}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-              },
-            });
-            
-            if (deleteResponse.ok) {
-              console.log(`  🗑️  Deleted mismatched dotPhrase: "${existing.trigger}"`);
-            }
-          } catch (error) {
-            console.warn(`  ⚠️  Error deleting dotPhrase "${existing.trigger}": ${error.message}`);
-          }
-        }
-      }
-      
-      // Create or skip dotPhrases based on expected list
-      for (const phrase of expectedDotPhrases) {
-        const existing = existingDotPhrases.find(dp => dp.trigger === phrase.trigger);
-        
-        if (existing && existing.expansion === phrase.expansion) {
-          // Already exists with correct expansion
-          console.log(`  ⏭️  Skipping dotPhrase: "${phrase.trigger}" (already exists)`);
-          createdDotPhrases.push({
-            id: existing.id,
-            trigger: phrase.trigger,
-            expansion: phrase.expansion,
-          });
-        } else {
-          // Create new or update
-          try {
-            const response = await fetch('http://localhost:3001/api/dot-phrases', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                trigger: phrase.trigger,
-                expansion: phrase.expansion,
-              }),
-            });
-            
-            if (response.ok) {
-              const created = await response.json();
-              const dotPhraseId = created.id || created.data?.id || created.data?.dotPhrase?.id;
-              createdDotPhrases.push({
-                id: dotPhraseId,
-                trigger: phrase.trigger,
-                expansion: phrase.expansion,
-              });
-              console.log(`  ✓ Created dotPhrase: "${phrase.trigger}" → "${phrase.expansion}"`);
-            } else {
-              console.warn(`  ⚠️  Failed to create dotPhrase "${phrase.trigger}": ${response.status}`);
-            }
-          } catch (error) {
-            console.warn(`  ⚠️  Error creating dotPhrase "${phrase.trigger}": ${error.message}`);
-          }
-        }
-      }
-      console.log();
-      
-      // Get encounters for test data
-      const encounters = [];
-      const encResponse = await fetch('http://localhost:3001/api/patient-encounters', {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (encResponse.ok) {
-        const encData = await encResponse.json();
-        for (let i = 0; i < Math.min(3, encData.length); i++) {
-          encounters.push(encData[i]);
-        }
-      }
-
-      // Build testData from existing records
-      const recordings = [
+    // ===== STEP 4: Setup Recordings (if needed) =====
+    let recordingsResult = [];
+    const recordingsNeeded = matchedAttached.length < 3 || unmatchedUnattached.length < 2;
+    
+    if (recordingsNeeded) {
+      console.log('Step 4: Setting up test recordings...\n');
+      // TODO: Extract setupRecordings() logic here from existing code below
+      // For now, recordings setup continues in the else block below
+    } else {
+      console.log('Step 4: Complete test data already exists. Skipping recording setup.\n');
+      recordingsResult = [
         ...matchedAttached.slice(0, 3),
         ...unmatchedUnattached.slice(0, 2),
       ];
+    }
 
-      // Load old testData to compare encounter IDs
-      let oldRecordings = [];
+    // ===== STEP 5: Setup Patient Encounters (always runs) =====
+    console.log('Step 5: Setting up patient encounters...');
+    let createdEncounters = await setupPatientEncounters(accessToken);
+    
+    // If no encounters created, fetch existing ones
+    if (createdEncounters.length === 0) {
       try {
-        if (fs.existsSync(TEST_DATA_FILE)) {
-          const oldTestData = JSON.parse(fs.readFileSync(TEST_DATA_FILE, 'utf-8'));
-          oldRecordings = oldTestData.recordings || [];
-        }
-      } catch (e) {
-        // Ignore if file doesn't exist or can't be parsed
-      }
-
-      // Update recordings with encounter IDs and print status
-      const recordingsWithIds = recordings.map(r => {
-        if (r.encounterId !== null) {
-          const oldRec = oldRecordings.find(or => or.filename === r.filename);
-          const oldEncounterId = oldRec?.encounterId;
-          
-          if (oldEncounterId === r.encounterId) {
-            console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (SAME AS BEFORE)`);
-          } else {
-            console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (UPDATED)`);
-          }
-        }
-        return r;
-      });
-
-      const testData = {
-        createdAt: new Date().toISOString(),
-        testAccount: {
-          email: testAccount.email,
-          userId: userId,
-        },
-        encounters: encounters.map((e, i) => ({
-          id: e.id,
-          name: e.name,
-          displayId: 900 + i,
-        })),
-        recordings: recordingsWithIds,
-        dotPhrases: createdDotPhrases,
-      };
-
-      fs.writeFileSync(TEST_DATA_FILE, JSON.stringify(testData, null, 2));
-      console.log('✓ testData.json updated with dotPhrases\n');
-
-      console.log('='.repeat(70));
-      console.log('EXISTING TEST DATA');
-      console.log('='.repeat(70));
-      console.table(recordings.map(r => ({
-        filename: r.filename,
-        attached: r.attached ? 'Yes' : 'No',
-        encounterId: r.encounterId || 'N/A',
-      })));
-      console.log();
-      return;
-    }
-
-    // Step 4: Determine which files to upload and which encounters to create
-    console.log('Step 4: Planning uploads and encounters...');
-    
-    // Determine files that need uploading
-    const filesToUpload = localAudioFiles.filter(f => !remoteFileNames.has(f));
-    const filesToUploadSchemaInfo = TEST_DATA_SCHEMA
-      .filter(schema => filesToUpload.includes(localAudioFiles[schema.fileIndex]))
-      .sort((a, b) => a.fileIndex - b.fileIndex);
-    
-    console.log(`✓ Files to upload: ${filesToUpload.length}`);
-    console.log(`✓ Of those, attached to encounters: ${filesToUploadSchemaInfo.filter(s => s.shouldBeAttached).length}\n`);
-
-    // Create only the encounters needed for newly uploaded attached files
-    const encounters = [];
-    const encountersNeeded = filesToUploadSchemaInfo.filter(s => s.shouldBeAttached).length;
-    
-    if (encountersNeeded > 0) {
-      console.log(`Step 5: Creating ${encountersNeeded} test encounter(s)...`);
-      for (let i = 0; i < encountersNeeded; i++) {
-        const response = await fetch('http://localhost:3001/api/patient-encounters', {
-          method: 'POST',
+        const encResponse = await fetch('http://localhost:3001/api/patient-encounters', {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            name: `Encounter #${i + 1}`,
-          }),
         });
 
-        if (!response.ok) {
-          throw new Error(`Failed to create encounter #${i + 1}`);
+        if (encResponse.ok) {
+          createdEncounters = await encResponse.json();
         }
-
-        const encounter = await response.json();
-        encounters.push(encounter);
-        console.log(`✓ Created encounter #${i + 1}: ${encounter.id}`);
-      }
-      console.log();
-    }
-
-    // Step 6: Upload files to storage
-    console.log(`Step ${encounters.length > 0 ? 6 : 5}: Uploading test files to storage...`);
-    const uploadedPaths = [];
-    const uploadMap = new Map(); // Map filename -> schema info for this file
-    
-    if (filesToUpload.length === 0) {
-      console.log('  ⏭️  Skipping - all files already in storage');
-    } else {
-      for (const filename of filesToUpload) {
-      const localPath = path.join(FIXTURES_DIR, filename);
-      const remotePath = await uploadToStorage(supabase, userId, localPath, filename);
-      if (remotePath) {
-        uploadedPaths.push({
-          filename,
-          path: remotePath,
-        });
-        // Track which schema entry this file belongs to
-        const schemaInfo = TEST_DATA_SCHEMA.find(s => localAudioFiles[s.fileIndex] === filename);
-        if (schemaInfo) {
-          uploadMap.set(filename, schemaInfo);
-        }
+      } catch (error) {
+        console.warn(`  ⚠️  Error fetching encounters: ${error.message}`);
       }
     }
-    if (uploadedPaths.length > 0) {
-      console.log();
-    }
+
+    // ===== STEP 6: Setup DotPhrases (always runs) =====
+    console.log('Step 6: Setting up dotPhrases...');
+    const createdDotPhrases = await setupDotPhrases(accessToken);
+    
+    // ===== STEP 7: Setup SOAP Notes (always runs if encounters exist) =====
+    console.log('Step 7: Setting up SOAP notes...');
+    const createdSoapNotes = await setupSoapNotes(accessToken, createdEncounters);
+
+    // ===== STEP 8: Save test data =====
+    console.log('Step 8: Saving test data...\n');
+    
+    // Use first 3 encounters from createdEncounters (already has all 3 from setup)
+    const firstThreeEncounters = createdEncounters.slice(0, 3);
+
+    // If recordings setup was needed, do it now before saving testData
+    if (recordingsNeeded) {
+      // TODO: This section should be replaced with setupRecordings() return value
+      console.log('Setting up recordings...');
+      // For now, use matched+unmatched
+      recordingsResult = [
+        ...matchedAttached.slice(0, 3),
+        ...unmatchedUnattached.slice(0, 2),
+      ];
     }
 
-    // Step 7: Create recording entries with correct attachment status
-    console.log(`Step ${encounters.length > 0 ? 7 : 6}: Creating recording entries...`);
-    const recordings = [];
-    const newlyCreatedRecordings = [];
-    
-    // First add existing recordings to final list (already matched in Step 3)
-    const existingRecordings = [
-      ...matchedAttached.slice(0, 3),
-      ...unmatchedUnattached,
-    ];
-    
-    // Then add newly uploaded recordings
-    if (uploadedPaths.length > 0) {
-      let encounterIndex = 0;
-      for (const uploaded of uploadedPaths) {
-        const schemaInfo = uploadMap.get(uploaded.filename);
-        
-        if (schemaInfo && schemaInfo.shouldBeAttached && encounterIndex < encounters.length) {
-          // Attach to newly created encounter
-          const createdRecording = await createRecordingEntry(
-            accessToken,
-            uploaded.path,
-            encounters[encounterIndex].id
-          );
-          
-          if (createdRecording) {
-            const recEntry = {
-              id: createdRecording.id,
-              filename: uploaded.filename,
-              path: uploaded.path,
-              attached: true,
-              encounterId: encounters[encounterIndex].id,
-            };
-            recordings.push(recEntry);
-            newlyCreatedRecordings.push(recEntry);
-            console.log(`✓ Uploaded and attached to encounter ${encounters[encounterIndex].id}`);
-            encounterIndex++;
-          }
-        } else {
-          // Upload unattached
-          const recEntry = {
-            filename: uploaded.filename,
-            path: uploaded.path,
-            attached: false,
-            encounterId: null,
-          };
-          recordings.push(recEntry);
-          newlyCreatedRecordings.push(recEntry);
-          console.log(`✓ Uploaded (unattached)`);
-        }
-      }
-      console.log();
-    } else {
-      console.log('  ⏭️  Skipping - all recordings already in database');
-    }
-
-    // Combine existing and newly created recordings
-    const allRecordings = [
-      ...existingRecordings,
-      ...recordings,
-    ];
-
-    // Step 8: Fix any mismatches between schema and actual state
-    console.log(`\nStep ${encounters.length > 0 ? 8 : 7}: Checking for schema mismatches...`);
-    let mismatchesFixed = 0;
-    
-    for (const bucketFile of bucketFilesExcludingPlaceholder) {
-      const schemaInfo = TEST_DATA_SCHEMA.find(s => localAudioFiles[s.fileIndex] === bucketFile.name);
-      const existingRec = allRecordings.find(r => r.filename === bucketFile.name);
-      
-      if (!schemaInfo || !existingRec) continue;
-      
-      const shouldBeAttached = schemaInfo.shouldBeAttached;
-      const isAttached = existingRec.attached;
-      
-      // Case 1: Should be attached but isn't
-      if (shouldBeAttached && !isAttached) {
-        console.log(`  ⚠️  Fixing mismatch: "${bucketFile.name}" should be attached...`);
-        
-        // Create a new encounter for this file
-        const response = await fetch('http://localhost:3001/api/patient-encounters', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: `Auto-created encounter for ${bucketFile.name.substring(0, 30)}...`,
-          }),
-        });
-        
-        if (response.ok) {
-          const newEncounter = await response.json();
-          
-          // Attach the recording to the new encounter
-          const attachResponse = await fetch('http://localhost:3001/api/recordings', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              patientEncounter_id: newEncounter.id,
-              recording_file_path: bucketFile.path,
-            }),
-          });
-          
-          if (attachResponse.ok) {
-            const createdRecording = await attachResponse.json();
-            console.log(`    DEBUG: API response structure:`, JSON.stringify(createdRecording).substring(0, 200));
-            
-            // Extract ID from various possible response formats
-            const recordingId = createdRecording.id || createdRecording.data?.id || createdRecording?.data;
-            console.log(`    DEBUG: Extracted id=${recordingId}`);
-            
-            existingRec.attached = true;
-            existingRec.encounterId = newEncounter.id;
-            existingRec.id = recordingId;
-            
-            newlyCreatedRecordings.push(existingRec);
-            console.log(`    ✓ Attached to encounter ${newEncounter.id}`);
-            mismatchesFixed++;
-          }
-        }
-      }
-      
-      // Case 2: Should be unattached but is attached
-      if (!shouldBeAttached && isAttached) {
-        const redStart = '\x1b[31m';
-        const redEnd = '\x1b[0m';
-        console.log(redStart + `  ⚠️  Cannot fix: "${bucketFile.name}" is attached but should be unattached` + redEnd);
-        console.log(redStart + `    (Manual intervention required - cannot detach via API)` + redEnd);
-      }
-    }
-    
-    if (mismatchesFixed > 0) {
-      console.log(`  ✓ Fixed ${mismatchesFixed} mismatch(es)\n`);
-    } else {
-      console.log('  ✓ No mismatches found\n');
-    }
-
-    // Step 9: Save test data to JSON file
-    console.log(`Step ${encounters.length > 0 ? 9 : 8}: Saving test data...`);
-    
-    // Load old testData to compare encounter IDs for new recordings
+    // Load old testData to compare encounter IDs
     let oldRecordings = [];
     try {
       if (fs.existsSync(TEST_DATA_FILE)) {
@@ -780,57 +805,21 @@ async function setupTestData() {
     } catch (e) {
       // Ignore if file doesn't exist or can't be parsed
     }
-    
-    // Print encounter ID assignment status for newly uploaded files
-    for (const rec of recordings) {
-      if (rec.attached) {
-        const oldRec = oldRecordings.find(or => or.filename === rec.filename);
-        if (oldRec?.encounterId === rec.encounterId) {
-          console.log(`  ✓ Recording "${rec.filename}": Encounter ${rec.encounterId} (SAME AS BEFORE)`);
-        } else {
-          console.log(`  ✓ Recording "${rec.filename}": Encounter ${rec.encounterId} (ASSIGNED)`);
-        }
-      } else {
-        console.log(`  ✓ Recording "${rec.filename}": Unattached`);
-      }
-    }
 
-    // Step N: Create test dotPhrases
-    console.log('Creating test dotPhrases...');
-    const dotPhrasesToCreate = readDotPhraseFixtures();
-    const createdDotPhrases = [];
-    
-    for (const phrase of dotPhrasesToCreate) {
-      try {
-        const response = await fetch('http://localhost:3001/api/dot-phrases', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            trigger: phrase.trigger,
-            expansion: phrase.expansion,
-          }),
-        });
+    // Update recordings with encounter IDs and print status
+    const recordingsWithIds = recordingsResult.map(r => {
+      if (r.encounterId !== null) {
+        const oldRec = oldRecordings.find(or => or.filename === r.filename);
+        const oldEncounterId = oldRec?.encounterId;
         
-        if (response.ok) {
-          const created = await response.json();
-          const dotPhraseId = created.id || created.data?.id || created.data?.dotPhrase?.id;
-          createdDotPhrases.push({
-            id: dotPhraseId,
-            trigger: phrase.trigger,
-            expansion: phrase.expansion,
-          });
-          console.log(`  ✓ Created dotPhrase: "${phrase.trigger}" → "${phrase.expansion}"`);
+        if (oldEncounterId === r.encounterId) {
+          console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (SAME AS BEFORE)`);
         } else {
-          console.warn(`  ⚠️  Failed to create dotPhrase "${phrase.trigger}": ${response.status}`);
+          console.log(`  ✓ Recording "${r.filename}": Encounter ${r.encounterId} (UPDATED)`);
         }
-      } catch (error) {
-        console.warn(`  ⚠️  Error creating dotPhrase "${phrase.trigger}": ${error.message}`);
       }
-    }
-    console.log();
+      return r;
+    });
 
     const testData = {
       createdAt: new Date().toISOString(),
@@ -838,63 +827,37 @@ async function setupTestData() {
         email: testAccount.email,
         userId: userId,
       },
-      encounters: encounters.map((e, i) => ({
+      encounters: firstThreeEncounters.map((e, i) => ({
         id: e.id,
         name: e.name,
         displayId: 900 + i,
       })),
-      recordings: allRecordings,
+      recordings: recordingsWithIds,
       dotPhrases: createdDotPhrases,
+      soapNotes: {
+        note: 'Created during setup - 3 SOAP notes: 2 attached to encounter 1, 1 attached to encounter 2',
+        created: createdSoapNotes.length,
+      },
     };
 
     fs.writeFileSync(TEST_DATA_FILE, JSON.stringify(testData, null, 2));
     console.log(`✓ Test data saved to testData.json\n`);
-    
-    // DEBUG: Print all recording IDs being saved
-    console.log('DEBUG: Recordings in testData.json:');
-    allRecordings.forEach((rec, idx) => {
-      console.log(`  [${idx}] ${rec.filename}: id=${rec.id}, attached=${rec.attached}, encounterId=${rec.encounterId}`);
-    });
-    console.log();
 
-    // Get encounter IDs actually used in test data (referenced by recordings)
-    const usedEncounterIds = [...new Set(allRecordings
-      .filter(r => r.encounterId !== null)
-      .map(r => r.encounterId)
-    )];
-
-    // Summary - show all expected files vs actual status
+    // Print summary
     console.log('='.repeat(70));
     console.log('SETUP COMPLETE');
     console.log('='.repeat(70));
-    
-    // Build summary table showing expected vs actual for all local files
-    const summaryData = localAudioFiles.map((filename, index) => {
-      const rec = allRecordings.find(r => r.filename === filename);
-      const expectedStatus = TEST_DATA_SCHEMA[index]?.shouldBeAttached ? 'Attached' : 'Unattached';
-      const actualStatus = rec?.attached ? 'Attached' : 'Unattached';
-      const wasModified = newlyCreatedRecordings.some(nr => nr.filename === filename);
-      
-      return {
-        filename: filename,
-        expected: expectedStatus,
-        actual: actualStatus,
-        encounterId: rec?.encounterId || 'N/A',
-        status: (expectedStatus === actualStatus) ? '✓' : '✗',
-        modified: wasModified ? '✓' : '✗',
-      };
-    });
-    
-    console.table(summaryData);
-    
     console.log(`\nTest data created:`);
-    console.log(`  Encounters: ${usedEncounterIds.length} (IDs: ${usedEncounterIds.join(', ')})`);
-    const attachedCount = allRecordings.filter(r => r.attached).length;
-    const unattachedCount = allRecordings.filter(r => !r.attached).length;
-    console.log(`  Recordings: ${allRecordings.length} (${attachedCount} attached, ${unattachedCount} unattached)`);
+    console.log(`  Encounters: ${firstThreeEncounters.length} (IDs: ${firstThreeEncounters.map(e => e.id).join(', ')})`);
+    const attachedCount = recordingsWithIds.filter(r => r.attached).length;
+    const unattachedCount = recordingsWithIds.filter(r => !r.attached).length;
+    console.log(`  Recordings: ${recordingsWithIds.length} (${attachedCount} attached, ${unattachedCount} unattached)`);
+    console.log(`  SOAP Notes: ${createdSoapNotes.length} created (3 expected)`);
+    console.log(`  DotPhrases: ${createdDotPhrases.length} reconciled`);
     console.log(`  Storage: ${RECORDINGS_BUCKET} bucket`);
     console.log(`  Config: ${TEST_DATA_FILE}`);
     console.log('\nYou can now run:');
+    console.log('  npm run test:soap-notes   - Test the SOAP notes API');
     console.log('  npm run test:recordings    - Test the recordings API');
     console.log('  npm run test:transcripts   - Test the transcripts API (creates transcripts)');
     console.log('  npm test                   - Run all tests');

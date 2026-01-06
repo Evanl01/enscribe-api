@@ -1,46 +1,43 @@
 -- Enable row level security
 ALTER TABLE public."dotPhrases" ENABLE ROW LEVEL SECURITY;
 
--- 1️⃣ Users can view their own dot phrases
-CREATE POLICY "Users can view their own dot phrases"
-ON public."dotPhrases"
-AS PERMISSIVE
-FOR SELECT
-TO authenticated
-USING (
-    user_id = auth.uid()
+-- Users can view their own dot phrases
+create policy "Users can view their own dot phrases"
+on public."dotPhrases"
+as PERMISSIVE
+for SELECT
+to authenticated
+using (
+    user_id = (SELECT auth.uid())
 );
 
--- 2️⃣ Users can modify their own dot phrases (except user_id)
-CREATE POLICY "Users can modify their own dot phrases"
-ON public."dotPhrases"
-AS PERMISSIVE
-FOR ALL
-TO authenticated
-USING (
-    user_id = auth.uid()
-)
-WITH CHECK (
-    user_id = auth.uid() AND
+-- Users can insert their own dot phrases
+create policy "Users can insert their own dot phrases"
+on public."dotPhrases"
+as PERMISSIVE
+for INSERT
+to authenticated
+with check (
+    user_id = (SELECT auth.uid()) AND
     user_id IS NOT NULL
 );
 
--- 3️⃣ Users can insert dot phrases
-CREATE POLICY "Users can insert their own dot phrases"
-ON public."dotPhrases"
-AS PERMISSIVE
-FOR INSERT
-TO authenticated
-WITH CHECK (
-    user_id = auth.uid()
+-- Users can update their own dot phrases
+create policy "Users can update their own dot phrases"
+on public."dotPhrases"
+as PERMISSIVE
+for UPDATE
+to authenticated
+using (user_id = (SELECT auth.uid()))
+with check (
+    user_id = (SELECT auth.uid()) AND
+    user_id IS NOT NULL
 );
 
--- 4️⃣ Users can update their own dot phrases
-CREATE POLICY "Users can update their own dot phrases"
-ON public."dotPhrases"
-AS PERMISSIVE
-FOR UPDATE
-TO authenticated
-WITH CHECK (
-    user_id = auth.uid()
-);
+-- Users can delete their own dot phrases
+create policy "Users can delete their own dot phrases"
+on public."dotPhrases"
+as PERMISSIVE
+for DELETE
+to authenticated
+using (user_id = (SELECT auth.uid()));
