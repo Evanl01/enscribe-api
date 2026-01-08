@@ -90,13 +90,12 @@ export const transcriptCreateRequestSchema = z.object({
 });
 
 /**
- * PATCH request for updating a transcript - DISABLED
+ * PATCH request for updating a transcript
  * Endpoint: PATCH /api/transcripts/:id
- * Reason: Transcripts are immutable after creation (database trigger prevents changes)
  */
-// export const transcriptUpdateRequestSchema = z.object({
-//   transcript_text: z.string().min(1, 'Transcript text is required'),
-// });
+export const transcriptUpdateRequestSchema = z.object({
+  transcript_text: z.string().min(1, 'Transcript text is required'),
+});
 
 /**
  * POST request for creating a SOAP note
@@ -197,7 +196,7 @@ export const UnmaskPhiRequestBodySchema = z.object({
   text: z.string()
     .min(1, 'Text is required')
     .describe('Transcript with {{TYPE_ID}} tokens'),
-  tokens: z.record(z.any()).optional().default({})
+  tokens: z.object({}).passthrough().optional().default({})
     .describe('Token mapping for unmasking'),
 }).strict();
 

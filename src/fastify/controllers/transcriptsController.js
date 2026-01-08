@@ -4,6 +4,7 @@
  */
 import { getSupabaseClient } from '../../utils/supabase.js';
 import * as encryptionUtils from '../../utils/encryptionUtils.js';
+import { transcriptUpdateRequestSchema } from '../schemas/requests.js';
 
 const transcriptTable = 'transcripts';
 const BATCH_SIZE = 10; // Decrypt transcripts in batches of 10
@@ -232,16 +233,7 @@ export async function createTranscript(request, reply) {
 /**
  * Update a transcript - DISABLED
  * PATCH /api/transcripts/:id
- * 
- * Reason: Transcripts are immutable after creation.
- * Database trigger (prevent_transcript_fk_updates) prevents updating:
- * - recording_id (foreign key cannot be changed)
- * - user_id (ownership cannot be changed)
- * 
- * The only updateable field (transcript_text) is not practically useful.
- * If corrections are needed, delete and recreate the transcript.
  */
-/*
 export async function updateTranscript(request, reply) {
   try {
     const supabase = getSupabaseClient(request.headers.authorization);
@@ -323,7 +315,6 @@ export async function updateTranscript(request, reply) {
     return reply.status(500).send({ error: error.message });
   }
 }
-*/
 
 /**
  * Delete a transcript

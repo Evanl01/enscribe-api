@@ -358,15 +358,13 @@ async function runAllPromptLlmTests() {
     headers: { Authorization: `Bearer ${accessToken}` },
     expectedStatus: 400,
     customValidator: (body) => {
-      // Standard Zod error format: {error: {issues: [{code, path, message}, ...]}}
-      const hasErrorObject = body?.error && typeof body.error === 'object';
-      const hasIssuesArray = Array.isArray(body?.error?.issues) && body.error.issues.length > 0;
-      const hasRecordingPathIssue = body?.error?.issues?.some(issue => 
-        issue.path?.includes('recording_file_path') && issue.code === 'invalid_type'
-      );
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasRecordingPathIssue = /invalid_type.*recording_file_path/.test(JSON.stringify(body?.error));
+      
       return {
-        passed: hasErrorObject && hasIssuesArray && hasRecordingPathIssue,
-        message: hasRecordingPathIssue 
+        passed: isZodError && hasRecordingPathIssue,
+        message: (isZodError && hasRecordingPathIssue)
           ? 'Should return ZodError for missing recording_file_path'
           : `Invalid error format. Got: ${JSON.stringify(body?.error)}`
       };
@@ -379,7 +377,7 @@ async function runAllPromptLlmTests() {
   console.log('   Process: Audio → Transcribe (GCP) → Expand dot phrases → Mask PHI (AWS) → Generate SOAP (OpenAI o3)\n');
   
   // Use makePromptLlmRequest for proper SSE streaming support
-  const soapResponse = await makePromptLlmRequest('POST', '/api/prompt-llm', 
+  const soapResponse = await makePromptLlmRequest('POST', '/api/prompt-llms', 
     { recording_file_path: recording.path },
     { Authorization: `Bearer ${accessToken}` }
   );

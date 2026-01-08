@@ -7,10 +7,10 @@ import {
   getAllTranscripts,
   getTranscript,
   createTranscript,
-  // updateTranscript, // DISABLED: Transcripts are immutable (see controller for details)
+  updateTranscript,
   deleteTranscript,
 } from '../controllers/transcriptsController.js';
-import { transcriptCreateRequestSchema } from '../schemas/requests.js';
+import { transcriptCreateRequestSchema, transcriptUpdateRequestSchema } from '../schemas/requests.js';
 
 export async function registerTranscriptsRoutes(fastify) {
   // GET all transcripts
@@ -47,15 +47,27 @@ export async function registerTranscriptsRoutes(fastify) {
     },
   });
 
-  // PATCH update transcript - DISABLED
-  // Transcripts are immutable after creation due to database trigger constraint.
-  // To fix a transcript, delete and recreate it.
-  /*
+  // PATCH update transcript
   fastify.patch('/transcripts/:id', {
     preHandler: [fastify.authenticate],
-    handler: updateTranscript,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body
+        const parseResult = transcriptUpdateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        return updateTranscript(request, reply);
+      } catch (error) {
+        console.error('Error in transcripts update route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
-  */
 
   // DELETE transcript
   fastify.delete('/transcripts/:id', {

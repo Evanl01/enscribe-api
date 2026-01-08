@@ -285,11 +285,10 @@ async function runTranscriptsTests() {
     }
   }
 
-  // PATCH tests DISABLED - Transcripts are immutable after creation
-  // Database trigger (prevent_transcript_fk_updates) prevents updating recording_id and user_id
-  // The only updateable field (transcript_text) is not practically useful.
-  // To fix a transcript, delete and recreate it.
-  /*
+  // PATCH tests - Transcripts can now be updated
+  // Requires createdTranscriptId from Test 7 (POST /create transcript)
+  // If Test 7 fails or is skipped, PATCH tests will be skipped as well
+
   // Test 11: PATCH /transcripts/:id without auth
   if (createdTranscriptId) {
     await runner.test('PATCH /api/transcripts/:id without auth', {
@@ -301,6 +300,21 @@ async function runTranscriptsTests() {
       expectedStatus: 401,
       expectedFields: ['error'],
     });
+  } else {
+    runner.results.push({
+      name: 'PATCH /api/transcripts/:id without auth',
+      passed: false,
+      endpoint: `/api/transcripts/[id]`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)',
+      testNumber: 11,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 11: PATCH /api/transcripts/:id without auth');
+    console.log('    ⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)');
   }
 
   // Test 12: PATCH /transcripts/:id with invalid token
@@ -316,6 +330,21 @@ async function runTranscriptsTests() {
       },
       expectedStatus: 401,
     });
+  } else {
+    runner.results.push({
+      name: 'PATCH /api/transcripts/:id with invalid token',
+      passed: false,
+      endpoint: `/api/transcripts/[id]`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)',
+      testNumber: 12,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 12: PATCH /api/transcripts/:id with invalid token');
+    console.log('    ⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)');
   }
 
   // Test 13: PATCH /transcripts/:id - missing transcript_text
@@ -330,6 +359,21 @@ async function runTranscriptsTests() {
       expectedStatus: 400,
       expectedFields: ['error'],
     });
+  } else {
+    runner.results.push({
+      name: 'PATCH /api/transcripts/:id - missing transcript_text',
+      passed: false,
+      endpoint: `/api/transcripts/[id]`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 400,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No transcript ID available or missing auth token',
+      testNumber: 13,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 13: PATCH /api/transcripts/:id - missing transcript_text');
+    console.log('    ⚠️  SKIPPED: No transcript ID available or missing auth token');
   }
 
   // Test 14: PATCH /transcripts/:id - update transcript
@@ -350,6 +394,21 @@ async function runTranscriptsTests() {
     if (result.passed && result.body?.id === createdTranscriptId) {
       console.log(`    ✓ Updated transcript ${createdTranscriptId}`);
     }
+  } else {
+    runner.results.push({
+      name: 'PATCH /api/transcripts/:id - update transcript',
+      passed: false,
+      endpoint: `/api/transcripts/[id]`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 200,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No transcript ID available or missing auth token',
+      testNumber: 14,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 14: PATCH /api/transcripts/:id - update transcript');
+    console.log('    ⚠️  SKIPPED: No transcript ID available or missing auth token');
   }
 
   // Test 15: PATCH /transcripts/:id - not found
@@ -365,8 +424,22 @@ async function runTranscriptsTests() {
       },
       expectedStatus: 404,
     });
+  } else {
+    runner.results.push({
+      name: 'PATCH /api/transcripts/:id - not found',
+      passed: false,
+      endpoint: '/api/transcripts/99999',
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 404,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token',
+      testNumber: 15,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 15: PATCH /api/transcripts/:id - not found');
+    console.log('    ⚠️  SKIPPED: Missing auth token');
   }
-  */
 
   // Test 16: DELETE /transcripts/:id without auth
   if (createdTranscriptId) {
