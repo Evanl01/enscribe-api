@@ -328,7 +328,26 @@ async function testErrorHandling(accessToken, testData) {
   
   const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
   
-  // Test 7: Missing required body field
+  // Test 7: Missing required body field - transcript missing from /gcp/expand
+  await runner.test('Reject /gcp/expand without transcript field', {
+    method: 'POST',
+    endpoint: '/api/gcp/expand',
+    body: {
+      dotPhrases: [],
+      enableDotPhraseExpansion: true,
+    },
+    headers,
+    expectedStatus: 400,
+    expectedFields: ['error'],
+    customValidator: (response) => {
+      return {
+        passed: response.error?.issues || response.error?.errors || !!response.error,
+        message: response.error?.issues ? 'ZodError validation failed' : 'Validation error'
+      };
+    },
+  });
+  
+  // Test 8: Missing required body field - signed URL from /gcp/transcribe/complete
   await runner.test('Reject request without signed URL', {
     method: 'POST',
     endpoint: '/api/gcp/transcribe/complete',
@@ -338,13 +357,13 @@ async function testErrorHandling(accessToken, testData) {
     expectedFields: ['error'],
     customValidator: (response) => {
       return {
-        passed: response.error?.includes('recording_file_signed_url') || !!response.error,
-        message: response.error || 'Missing required field error'
+        passed: response.error?.issues || response.error?.errors || !!response.error,
+        message: response.error?.issues ? 'ZodError validation failed' : 'Validation error'
       };
     },
   });
   
-  // Test 8: Malformed signed URL
+  // Test 9: Malformed signed URL
   await runner.test('Handle malformed signed URL', {
     method: 'POST',
     endpoint: '/api/gcp/transcribe/complete',
@@ -362,7 +381,7 @@ async function testErrorHandling(accessToken, testData) {
     },
   });
   
-  // Test 9: Disabled dot phrase expansion
+  // Test 10: Disabled dot phrase expansion
   // Test that expansion can be disabled and transcript is returned unchanged
   const transcriptWithTriggers = `The pt was examined. Multiple pts were waiting.`;
   

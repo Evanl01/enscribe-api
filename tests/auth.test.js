@@ -44,6 +44,18 @@ async function runAuthTests() {
       email: 'test@example.com',
     },
     expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasPasswordIssue = /invalid_type.*password/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasPasswordIssue,
+        message: (isZodError && hasPasswordIssue)
+          ? 'Should return ZodError for missing password'
+          : `Expected ZodError for missing password. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // Test 3: Sign-up with invalid email format
@@ -56,6 +68,42 @@ async function runAuthTests() {
       password: 'Password123!',
     },
     expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasEmailIssue = /invalid_format.*email/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasEmailIssue,
+        message: (isZodError && hasEmailIssue)
+          ? 'Should return ZodError for invalid email format'
+          : `Expected ZodError for invalid email. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
+  });
+
+  // Test 3b: Sign-up with password too short (< 8 characters)
+  await runner.test('Sign-up with password too short', {
+    method: 'POST',
+    endpoint: '/api/auth',
+    body: {
+      action: 'sign-up',
+      email: 'valid@example.com',
+      password: 'Short1!',
+    },
+    expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasPasswordIssue = /too_small.*password/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasPasswordIssue,
+        message: (isZodError && hasPasswordIssue)
+          ? 'Should return ZodError for password too short'
+          : `Expected ZodError for password too short. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // Test 4: Sign-in with valid credentials (uses real test account if configured)
@@ -96,6 +144,37 @@ async function runAuthTests() {
       password: 'WrongPassword123!',
     },
     expectedStatus: 401,
+    customValidator: (body) => {
+      // Business error (not Zod) - should be plain error string from Supabase
+      return {
+        passed: body?.error && typeof body.error === 'string',
+        message: body?.error || 'Should return error message for wrong password'
+      };
+    },
+  });
+
+  // Test 5b: Sign-in with empty password
+  await runner.test('Sign-in with empty password', {
+    method: 'POST',
+    endpoint: '/api/auth',
+    body: {
+      action: 'sign-in',
+      email: 'existinguser@example.com',
+      password: '',
+    },
+    expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasPasswordIssue = /too_small.*password/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasPasswordIssue,
+        message: (isZodError && hasPasswordIssue)
+          ? 'Should return ZodError for empty password'
+          : `Expected ZodError for empty password. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // Test 6: Sign-in with non-existent user
@@ -163,6 +242,18 @@ async function runAuthTests() {
       action: 'resend',
     },
     expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasEmailIssue = /invalid_type.*email/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasEmailIssue,
+        message: (isZodError && hasEmailIssue)
+          ? 'Should return ZodError for missing email'
+          : `Expected ZodError for missing email. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // Test 12: Invalid action type
@@ -173,7 +264,13 @@ async function runAuthTests() {
       action: 'invalid-action',
     },
     expectedStatus: 400,
-    expectedFields: ['error'],
+    customValidator: (body) => {
+      // Should return plain error string for unknown action
+      return {
+        passed: body?.error && typeof body.error === 'string' && body.error.includes('Unknown action'),
+        message: body?.error || 'Should return error for unknown action'
+      };
+    },
   });
 
   // Test 13: Missing action field
@@ -185,6 +282,17 @@ async function runAuthTests() {
       password: 'password',
     },
     expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      
+      return {
+        passed: isZodError,
+        message: isZodError
+          ? 'Should return ZodError for missing action'
+          : `Expected ZodError for missing action. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // Test 14: Resend with redirect URL
@@ -197,6 +305,30 @@ async function runAuthTests() {
       emailRedirectTo: 'https://myapp.com/confirm',
     },
     expectedStatus: 200,
+  });
+
+  // Test 14b: Resend with invalid emailRedirectTo URL
+  await runner.test('Resend with invalid emailRedirectTo URL', {
+    method: 'POST',
+    endpoint: '/api/auth',
+    body: {
+      action: 'resend',
+      email: 'testuser@example.com',
+      emailRedirectTo: 'not-a-valid-url',
+    },
+    expectedStatus: 400,
+    customValidator: (body) => {
+      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+      const hasUrlIssue = /invalid_format.*emailRedirectTo/.test(JSON.stringify(body?.error));
+      
+      return {
+        passed: isZodError && hasUrlIssue,
+        message: (isZodError && hasUrlIssue)
+          ? 'Should return ZodError for invalid emailRedirectTo URL'
+          : `Expected ZodError for invalid emailRedirectTo URL. Got: ${JSON.stringify(body?.error)}`
+      };
+    },
   });
 
   // ===========================================

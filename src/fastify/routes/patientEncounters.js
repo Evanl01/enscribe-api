@@ -11,7 +11,7 @@ import {
   getCompletePatientEncounter,
   completePatientEncounter,
 } from '../controllers/patientEncountersController.js';
-import { patientEncounterCompleteCreateRequestSchema } from '../schemas/requests.js';
+import { patientEncounterCreateRequestSchema, patientEncounterUpdateRequestSchema, patientEncounterCompleteCreateRequestSchema } from '../schemas/requests.js';
 
 /**
  * Register patient encounters routes
@@ -29,7 +29,23 @@ export async function registerPatientEncountersRoutes(fastify) {
   // Create a new patient encounter
   fastify.post('/patient-encounters', {
     preHandler: [fastify.authenticate],
-    handler: createPatientEncounter,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body
+        const parseResult = patientEncounterCreateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        return createPatientEncounter(request, reply);
+      } catch (error) {
+        console.error('Error in POST /patient-encounters route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 
   // GET /patient-encounters/:id
@@ -43,7 +59,23 @@ export async function registerPatientEncountersRoutes(fastify) {
   // Update a patient encounter
   fastify.patch('/patient-encounters/:id', {
     preHandler: [fastify.authenticate],
-    handler: updatePatientEncounter,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body
+        const parseResult = patientEncounterUpdateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        return updatePatientEncounter(request, reply);
+      } catch (error) {
+        console.error('Error in PATCH /patient-encounters/:id route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 
   // DELETE /patient-encounters/:id

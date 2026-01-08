@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { getSupabaseClient } from '../../utils/supabase.js';
+import { dotPhraseCreateRequestSchema, dotPhraseUpdateRequestSchema } from '../schemas/requests.js';
 import {
   getOneDotPhrase,
   getAllDotPhrasesForUser,
@@ -71,12 +72,16 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
-        const { trigger, expansion } = request.body;
-
-        if (!trigger || !expansion) {
-          return reply.status(400).send({ error: 'trigger and expansion are required' });
+        // Validate request body
+        const parseResult = dotPhraseCreateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
         }
 
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        const { trigger, expansion } = request.body;
         const supabase = getSupabaseClient(request.headers.authorization);
 
         const result = await createDotPhrase(request.user.id, trigger, expansion, supabase);
@@ -102,6 +107,15 @@ export default fp(async function dotPhrasesRoutes(fastify, options) {
     { preHandler: fastify.authenticate },
     async (request, reply) => {
       try {
+        // Validate request body
+        const parseResult = dotPhraseUpdateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
         const { id } = request.params;
         const supabase = getSupabaseClient(request.headers.authorization);
 

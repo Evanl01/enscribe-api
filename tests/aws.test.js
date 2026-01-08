@@ -273,13 +273,31 @@ async function testUnmaskPhi(accessToken) {
     expectedFields: ['unmaskedText'],
   });
 
-  // Test 7: Missing authentication on unmask
-  const test7Body = { text: 'Some text', tokens: {} };
+  // Test 7: Missing text field in unmask request
+  const test7Body = { tokens: {} };
   console.log(`  Test 7 body: ${JSON.stringify(test7Body).substring(0, 200)}`);
-  await runner.test('Reject unmask without authentication', {
+  await runner.test('Reject unmask without text field', {
     method: 'POST',
     endpoint: '/api/aws/unmask-phi',
     body: test7Body,
+    headers,
+    expectedStatus: 400,
+    expectedFields: ['error'],
+    customValidator: (response) => {
+      return {
+        passed: response.error?.issues || response.error?.errors || !!response.error,
+        message: response.error?.issues ? 'ZodError validation failed' : 'Validation error'
+      };
+    },
+  });
+
+  // Test 8: Missing authentication on unmask
+  const test8Body = { text: 'Some text', tokens: {} };
+  console.log(`  Test 8 body: ${JSON.stringify(test8Body).substring(0, 200)}`);
+  await runner.test('Reject unmask without authentication', {
+    method: 'POST',
+    endpoint: '/api/aws/unmask-phi',
+    body: test8Body,
     expectedStatus: 401,
   });
 }
@@ -340,6 +358,12 @@ async function testEdgeCases(accessToken) {
     headers,
     expectedStatus: 400,
     expectedFields: ['error'],
+    customValidator: (response) => {
+      return {
+        passed: response.error?.issues || response.error?.errors || !!response.error,
+        message: response.error?.issues ? 'ZodError validation failed' : 'Validation error'
+      };
+    },
   });
 
   // Test 10: Special characters and unusual formatting
@@ -377,6 +401,12 @@ async function testEdgeCases(accessToken) {
     body: test12Body,
     headers,
     expectedStatus: 400,
+    customValidator: (response) => {
+      return {
+        passed: response.error?.issues || response.error?.errors || !!response.error,
+        message: response.error?.issues ? 'ZodError validation failed' : 'Validation error'
+      };
+    },
   });
 }
 

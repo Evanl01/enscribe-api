@@ -456,6 +456,13 @@ async function runSoapNotesTests() {
         },
         body: mockSoapNoteData,
         expectedStatus: 400,
+        validator: (data) => {
+          if (!data.error) return { valid: false, reason: 'Missing error field' };
+          if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+          if (!data.error.message.includes('patientEncounter_id')) return { valid: false, reason: 'Error message should mention patientEncounter_id field' };
+          if (!data.error.message.includes('required')) return { valid: false, reason: 'Error message should mention required' };
+          return { valid: true };
+        },
       });
 
       // Test 11: Create SOAP note with invalid patientEncounter_id (should fail)

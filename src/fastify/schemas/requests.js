@@ -42,7 +42,6 @@ export const patientEncounterCompleteCreateRequestSchema = z.object({
  * Use PATCH /api/patient-encounters/{id}/update-with-transcript for compound updates
  */
 export const patientEncounterUpdateRequestSchema = z.object({
-  id: z.number().int('ID must be an integer'),
   name: z.string().min(1, 'Name is required').optional(),
 });
 
@@ -73,6 +72,15 @@ export const recordingsAttachmentsQuerySchema = z.object({
 });
 
 /**
+ * POST request for creating a recording
+ * Endpoint: POST /api/recordings
+ */
+export const recordingCreateRequestSchema = z.object({
+  patientEncounter_id: z.number('Patient Encounter ID is required').int('Patient Encounter ID must be an integer'),
+  recording_file_path: z.string('Recording file path is required').min(1, 'Recording file path is required'),
+});
+
+/**
  * POST request for creating a transcript
  * Endpoint: POST /api/transcripts
  */
@@ -82,19 +90,20 @@ export const transcriptCreateRequestSchema = z.object({
 });
 
 /**
- * PATCH request for updating a transcript
+ * PATCH request for updating a transcript - DISABLED
  * Endpoint: PATCH /api/transcripts/:id
+ * Reason: Transcripts are immutable after creation (database trigger prevents changes)
  */
-export const transcriptUpdateRequestSchema = z.object({
-  transcript_text: z.string().min(1, 'Transcript text is required'),
-});
+// export const transcriptUpdateRequestSchema = z.object({
+//   transcript_text: z.string().min(1, 'Transcript text is required'),
+// });
 
 /**
  * POST request for creating a SOAP note
  * Endpoint: POST /api/soap-notes
  */
 export const soapNoteCreateRequestSchema = z.object({
-  patientEncounter_id: z.number().int('Patient Encounter ID must be an integer'),
+  patientEncounter_id: z.number('Patient Encounter ID is required').int('Patient Encounter ID must be an integer'),
   soapNote_text: z.object({
     soapNote: z.object({
       subjective: z.string().optional().default(''),
@@ -122,4 +131,151 @@ export const soapNoteUpdateRequestSchema = z.object({
     billingSuggestion: z.string().optional().default(''),
   }),
 });
+/**
+ * POST request for SOAP note generation via OpenAI
+ * Endpoint: POST /api/prompt-llm
+ */
+export const promptLlmRequestSchema = z.object({
+  recording_file_path: z.string('Recording file path is required').min(1, 'Recording file path is required'),
+});
 
+/**
+ * POST request for creating a dot phrase
+ * Endpoint: POST /api/dot-phrases
+ */
+export const dotPhraseCreateRequestSchema = z.object({
+  trigger: z.string('Trigger is required').min(1, 'Trigger is required'),
+  expansion: z.string('Expansion is required').min(1, 'Expansion is required'),
+});
+
+/**
+ * PATCH request for updating a dot phrase
+ * Endpoint: PATCH /api/dot-phrases/:id
+ */
+export const dotPhraseUpdateRequestSchema = z.object({
+  trigger: z.string('Trigger is required').min(1, 'Trigger is required').optional(),
+  expansion: z.string('Expansion is required').min(1, 'Expansion is required').optional(),
+}).refine(
+  (data) => data.trigger !== undefined || data.expansion !== undefined,
+  { message: 'At least one of trigger or expansion must be provided' }
+);
+
+/**
+ * POST request for GCP expand endpoint (test dot phrase expansion without transcription)
+ * Endpoint: POST /api/gcp/expand
+ */
+export const gcpExpandRequestSchema = z.object({
+  transcript: z.string().min(1, 'Transcript is required'),
+  dotPhrases: z.array(z.object({
+    trigger: z.string(),
+    expansion: z.string(),
+  })).default([]),
+  enableDotPhraseExpansion: z.boolean().default(true).optional(),
+});
+
+/**
+ * POST request for AWS mask-phi endpoint
+ * Endpoint: POST /api/aws/mask-phi
+ */
+export const MaskPhiRequestBodySchema = z.object({
+  text: z.string()
+    .min(1, 'Text is required')
+    .describe('Medical transcript to mask'),
+  maskThreshold: z.number()
+    .min(0)
+    .max(1)
+    .optional()
+    .default(0.15)
+    .describe('Confidence threshold for masking (0-1, default 0.15)'),
+});
+
+/**
+ * POST request for AWS unmask-phi endpoint
+ * Endpoint: POST /api/aws/unmask-phi
+ */
+export const UnmaskPhiRequestBodySchema = z.object({
+  text: z.string()
+    .min(1, 'Text is required')
+    .describe('Transcript with {{TYPE_ID}} tokens'),
+  tokens: z.record(z.any()).optional().default({})
+    .describe('Token mapping for unmasking'),
+}).strict();
+
+/**
+ * POST request for GCP transcribe/complete endpoint
+ * Endpoint: POST /api/gcp/transcribe/complete
+ */
+export const TranscribeRequestBodySchema = z.object({
+  recording_file_signed_url: z.string()
+    .url('recording_file_signed_url must be a valid URL')
+    .describe('Signed URL to the recording file in Supabase'),
+  enableDotPhraseExpansion: z.boolean()
+    .optional()
+    .default(true)
+    .describe('Whether to enable dot phrase expansion (default: true)'),
+});
+
+// ============================================================================
+// Authentication Schemas
+// ============================================================================
+
+/**
+ * POST request for auth sign-up action
+ * Endpoint: POST /api/auth
+ * Action: sign-up
+ */
+export const authSignUpRequestSchema = z.object({
+  action: z.literal('sign-up'),
+  email: z.string()
+    .email('Invalid email format')
+    .min(1, 'Email is required'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters'),
+});
+
+/**
+ * POST request for auth sign-in action
+ * Endpoint: POST /api/auth
+ * Action: sign-in
+ */
+export const authSignInRequestSchema = z.object({
+  action: z.literal('sign-in'),
+  email: z.string()
+    .email('Invalid email format')
+    .min(1, 'Email is required'),
+  password: z.string()
+    .min(1, 'Password is required'),
+});
+
+/**
+ * POST request for auth sign-out action
+ * Endpoint: POST /api/auth
+ * Action: sign-out
+ */
+export const authSignOutRequestSchema = z.object({
+  action: z.literal('sign-out'),
+});
+
+/**
+ * POST request for auth check-validity action
+ * Endpoint: POST /api/auth
+ * Action: check-validity
+ */
+export const authCheckValidityRequestSchema = z.object({
+  action: z.literal('check-validity'),
+});
+
+/**
+ * POST request for auth resend action
+ * Endpoint: POST /api/auth
+ * Action: resend
+ */
+export const authResendRequestSchema = z.object({
+  action: z.literal('resend'),
+  email: z.string()
+    .email('Invalid email format')
+    .min(1, 'Email is required'),
+  emailRedirectTo: z.string()
+    .url('emailRedirectTo must be a valid URL')
+    .optional(),
+});

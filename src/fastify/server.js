@@ -19,6 +19,7 @@ import { registerTranscriptsRoutes } from './routes/transcripts.js';
 import { registerSoapNotesRoutes } from './routes/soapNotes.js';
 import { registerMaskPhiRoutes } from './routes/maskPhi.routes.js';
 import { registerTranscribeRoutes } from './routes/transcribe.routes.js';
+import { registerPromptLlmRoutes } from './routes/promptLlm.routes.js';
 
 /**
  * Create and configure Fastify application
@@ -83,6 +84,7 @@ async function createFastifyApp(options = {}) {
     await registerSoapNotesRoutes(apiScope);
     await registerMaskPhiRoutes(apiScope);
     await registerTranscribeRoutes(apiScope);
+    await registerPromptLlmRoutes(apiScope);
   }, { prefix: '/api' });
 
   // Health check route (no auth required)
@@ -105,6 +107,24 @@ async function createFastifyApp(options = {}) {
 
     const statusCode = error.statusCode || 500;
     const message = error.message || 'Internal Server Error';
+
+    // Handle Fastify validation errors with proper error response
+    if (error.code === 'FST_ERR_VALIDATION') {
+      fastify.log.error('Validation Error Details:', {
+        code: error.code,
+        message: error.message,
+        statusCode: error.statusCode,
+        validation: error.validation
+      });
+      const response = {
+        error: 'Validation Error',
+        message: message
+      };
+      if (error.validation && Array.isArray(error.validation)) {
+        response.validation = error.validation;
+      }
+      return reply.status(statusCode).send(response);
+    }
 
     return reply.status(statusCode).send({
       statusCode,

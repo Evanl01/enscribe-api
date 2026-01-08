@@ -3,7 +3,6 @@
  * Handles all SOAP note CRUD operations with encryption/decryption
  */
 import { getSupabaseClient } from '../../utils/supabase.js';
-import { soapNoteCreateRequestSchema, soapNoteUpdateRequestSchema } from '../schemas/requests.js';
 import * as encryptionUtils from '../../utils/encryptionUtils.js';
 import parseSoapNotes from '../../utils/parseSoapNotes.js';
 
@@ -187,13 +186,7 @@ export async function createSoapNote(request, reply) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    // Validate request body
-    const validationResult = soapNoteCreateRequestSchema.safeParse(request.body);
-    if (!validationResult.success) {
-      return reply.status(400).send({ error: validationResult.error.errors });
-    }
-
-    const { patientEncounter_id, soapNote_text } = validationResult.data;
+    const { patientEncounter_id, soapNote_text } = request.body;
 
     // Verify user owns the patientEncounter
     const { data: encounter, error: encounterError } = await supabase
@@ -215,7 +208,7 @@ export async function createSoapNote(request, reply) {
     let iv;
     try {
       const encryptResult = encryptionUtils.encryptField(
-        { soapNote_text: JSON.stringify(validationResult.data.soapNote_text) },
+        { soapNote_text: JSON.stringify(soapNote_text) },
         'soapNote_text',
         encryptedAESKey
       );
@@ -276,13 +269,7 @@ export async function updateSoapNote(request, reply) {
       return reply.status(400).send({ error: 'Invalid SOAP note ID format' });
     }
 
-    // Validate request body
-    const validationResult = soapNoteUpdateRequestSchema.safeParse(request.body);
-    if (!validationResult.success) {
-      return reply.status(400).send({ error: validationResult.error.errors });
-    }
-
-    const { soapNote_text } = validationResult.data;
+    const { soapNote_text } = request.body;
 
     // Fetch SOAP note with patientEncounter to get AES key
     const { data: soapNote, error: fetchError } = await supabase

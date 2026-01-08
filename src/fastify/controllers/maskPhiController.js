@@ -27,7 +27,8 @@ export async function maskPhiHandler(request, reply) {
       return reply.status(401).send({ error: 'Authentication failed' });
     }
 
-    const { text, maskThreshold = 0.15 } = request.body;
+    // Request body is already validated by route
+    const { text, maskThreshold } = request.body;
 
     // Mask PHI
     const result = await mask_phi(text, maskThreshold);
@@ -65,7 +66,8 @@ export async function unmaskPhiHandler(request, reply) {
       return reply.status(401).send({ error: 'Authentication failed' });
     }
 
-    const { text, tokens = {} } = request.body;
+    // Request body is already validated by route
+    const { text, tokens } = request.body;
 
     // Unmask PHI
     const result = unmask_phi(text, tokens);

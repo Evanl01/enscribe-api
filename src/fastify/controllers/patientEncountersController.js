@@ -1,12 +1,25 @@
 /**
  * Patient Encounters Controller
  * Handles all patient encounter CRUD operations, batch operations, and completion
+ * Validation is handled in routes using Zod schemas
  */
 import { getSupabaseClient } from '../../utils/supabase.js';
-import { patientEncounterCreateRequestSchema, patientEncounterUpdateRequestSchema, patientEncounterForDatabaseSchema } from '../schemas/requests.js';
 import * as encryptionUtils from '../../utils/encryptionUtils.js';
 
 const patientEncounterTable = 'patientEncounters';
+
+/**
+ * Helper: Validates bigint ID format
+ */
+function isValidBigInt(id) {
+  if (!id) return false;
+  try {
+    const parsed = BigInt(id);
+    return parsed > 0n;
+  } catch (error) {
+    return false;
+  }
+}
 
 /**
  * Get all patient encounters for the authenticated user
@@ -133,18 +146,8 @@ export async function createPatientEncounter(request, reply) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    // Validate request body
-    const parseResult = patientEncounterCreateRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({ error: parseResult.error });
-    }
-
-    const encounter = parseResult.data;
-
-    // Validate required fields
-    if (!encounter.name) {
-      return reply.status(400).send({ error: 'name is required' });
-    }
+    // Request body is already validated by route
+    const encounter = request.body;
 
     // Set user_id to authenticated user
     encounter.user_id = user.id;
@@ -210,13 +213,8 @@ export async function updatePatientEncounter(request, reply) {
       return reply.status(400).send({ error: 'Invalid ID format - must be a numeric ID' });
     }
 
-    // Validate request body
-    const parseResult = patientEncounterUpdateRequestSchema.partial().safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({ error: parseResult.error });
-    }
-
-    const updates = parseResult.data;
+    // Request body is already validated by route
+    const updates = request.body;
 
     // Step 1: Fetch existing encounter to verify it exists and get encryption key
     const { data: encounter, error: fetchError } = await supabase
@@ -708,12 +706,4 @@ export async function completePatientEncounter(request, reply) {
 
     return reply.status(500).send({ error: errorMessage });
   }
-}
-
-/**
- * Helper function to validate bigint ID format
- */
-function isValidBigInt(id) {
-  // IDs should be numeric strings
-  return /^\d+$/.test(id);
 }

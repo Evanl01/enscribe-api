@@ -1,5 +1,13 @@
 import fp from 'fastify-plugin';
 import * as authController from '../controllers/authController.js';
+import { serializeZodError } from '../utils/serializeZodError.js';
+import {
+  authSignUpRequestSchema,
+  authSignInRequestSchema,
+  authSignOutRequestSchema,
+  authCheckValidityRequestSchema,
+  authResendRequestSchema,
+} from '../schemas/requests.js';
 
 /**
  * Fastify plugin for authentication routes
@@ -35,8 +43,27 @@ async function authRoutes(fastify, opts) {
     console.log(`[POST /auth] action=${action}, email=${email}`);
 
     try {
+      // Validate action field first
+      if (!action || typeof action !== 'string') {
+        return reply.status(400).send({
+          error: serializeZodError({
+            issues: [{
+              code: 'invalid_type',
+              path: ['action'],
+              message: 'Action is required and must be a string',
+            }],
+          }),
+        });
+      }
+
+      // Validate request based on action
+      let validation;
       switch (action) {
         case 'sign-up': {
+          validation = authSignUpRequestSchema.safeParse(request.body);
+          if (!validation.success) {
+            return reply.status(400).send({ error: serializeZodError(validation.error) });
+          }
           const result = await authController.signUp(email, password);
           
           if (!result.success) {
@@ -71,6 +98,10 @@ async function authRoutes(fastify, opts) {
         }
 
         case 'sign-in': {
+          validation = authSignInRequestSchema.safeParse(request.body);
+          if (!validation.success) {
+            return reply.status(400).send({ error: serializeZodError(validation.error) });
+          }
           const result = await authController.signIn(email, password);
           
           if (!result.success) {
@@ -105,6 +136,10 @@ async function authRoutes(fastify, opts) {
         }
 
         case 'sign-out': {
+          validation = authSignOutRequestSchema.safeParse(request.body);
+          if (!validation.success) {
+            return reply.status(400).send({ error: serializeZodError(validation.error) });
+          }
           // Get user from auth header
           const authHeader = getAuthHeader(request);
           const tokenCheck = await authController.checkTokenValidity(authHeader);
@@ -128,6 +163,10 @@ async function authRoutes(fastify, opts) {
         }
 
         case 'check-validity': {
+          validation = authCheckValidityRequestSchema.safeParse(request.body);
+          if (!validation.success) {
+            return reply.status(400).send({ error: serializeZodError(validation.error) });
+          }
           const authHeader = getAuthHeader(request);
           const result = await authController.checkTokenValidity(authHeader);
 
@@ -143,6 +182,10 @@ async function authRoutes(fastify, opts) {
         }
 
         case 'resend': {
+          validation = authResendRequestSchema.safeParse(request.body);
+          if (!validation.success) {
+            return reply.status(400).send({ error: serializeZodError(validation.error) });
+          }
           const result = await authController.resendConfirmationEmail(
             email,
             emailRedirectTo

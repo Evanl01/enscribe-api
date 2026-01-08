@@ -623,19 +623,6 @@ export async function expandHandler(request, reply) {
   try {
     const { transcript, dotPhrases = [], enableDotPhraseExpansion = true } = request.body || {};
     
-    // Validate required fields
-    if (!transcript || typeof transcript !== 'string') {
-      const e = new Error('transcript is required and must be a string');
-      e.status = 400;
-      throw e;
-    }
-    
-    if (!Array.isArray(dotPhrases)) {
-      const e = new Error('dotPhrases must be an array');
-      e.status = 400;
-      throw e;
-    }
-    
     console.log(`[expandHandler] Expanding transcript with ${dotPhrases.length} dot phrases`);
     
     let expanded = transcript;

@@ -1,6 +1,7 @@
 /**
  * Transcripts Routes
  * Defines all transcript API endpoints
+ * Validation is handled in routes using Zod schemas
  */
 import {
   getAllTranscripts,
@@ -9,6 +10,7 @@ import {
   // updateTranscript, // DISABLED: Transcripts are immutable (see controller for details)
   deleteTranscript,
 } from '../controllers/transcriptsController.js';
+import { transcriptCreateRequestSchema } from '../schemas/requests.js';
 
 export async function registerTranscriptsRoutes(fastify) {
   // GET all transcripts
@@ -26,7 +28,23 @@ export async function registerTranscriptsRoutes(fastify) {
   // POST create transcript
   fastify.post('/transcripts', {
     preHandler: [fastify.authenticate],
-    handler: createTranscript,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body
+        const parseResult = transcriptCreateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        return createTranscript(request, reply);
+      } catch (error) {
+        console.error('Error in transcripts create route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 
   // PATCH update transcript - DISABLED

@@ -8,7 +8,11 @@ import { handler, expandHandler } from '../controllers/transcribeController.js';
 import {
   transcribeRequestSchema,
   transcribeResponseSchema,
-} from '../schemas/transcribe.schema.js';
+} from '../schemas/responses.js';
+import {
+  TranscribeRequestBodySchema,
+  gcpExpandRequestSchema,
+} from '../schemas/requests.js';
 
 /**
  * Register transcription routes
@@ -22,7 +26,6 @@ export async function registerTranscribeRoutes(fastify) {
     schema: {
       description: 'Complete transcription pipeline: transcribe audio, expand dot phrases, mask PHI',
       tags: ['GCP', 'Transcription'],
-      body: transcribeRequestSchema,
       response: {
         200: {
           description: 'Successful transcription, expansion, and masking',
@@ -78,81 +81,46 @@ export async function registerTranscribeRoutes(fastify) {
         },
       },
     },
-    handler,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body schema
+        const validation = TranscribeRequestBodySchema.safeParse(request.body);
+        if (!validation.success) {
+          return reply.status(400).send({ error: validation.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = validation.data;
+
+        return handler(request, reply);
+      } catch (error) {
+        console.error('Error in transcribe complete route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 
   // POST /gcp/expand (prefix /api applied in server.js)
   // Unit test endpoint for dot phrase expansion without transcription
   fastify.post('/gcp/expand', {
     onRequest: [fastify.authenticate],
-    schema: {
-      description: 'Test dot phrase expansion with provided transcript and dot phrases (no transcription)',
-      tags: ['GCP', 'Expansion'],
-      body: {
-        type: 'object',
-        required: ['transcript'],
-        properties: {
-          transcript: {
-            type: 'string',
-            description: 'The transcript text to expand dot phrases in',
-          },
-          dotPhrases: {
-            type: 'array',
-            description: 'Array of dot phrase objects with trigger and expansion properties',
-            items: {
-              type: 'object',
-              properties: {
-                trigger: { type: 'string' },
-                expansion: { type: 'string' },
-              },
-            },
-          },
-          enableDotPhraseExpansion: {
-            type: 'boolean',
-            default: true,
-            description: 'Whether to perform dot phrase expansion',
-          },
-        },
-      },
-      response: {
-        200: {
-          description: 'Successful expansion',
-          type: 'object',
-          required: ['ok', 'expanded', 'llm_notated'],
-          properties: {
-            ok: {
-              type: 'boolean',
-              enum: [true],
-            },
-            expanded: {
-              type: 'string',
-              description: 'Transcript with clean expansions',
-            },
-            llm_notated: {
-              type: 'string',
-              description: 'Transcript with expansions marked for LLM processing',
-            },
-            dotPhrasesApplied: {
-              type: 'integer',
-              description: 'Number of dot phrases available',
-            },
-          },
-        },
-        400: {
-          description: 'Bad request (missing or invalid parameters)',
-          type: 'object',
-          required: ['error'],
-          properties: { error: { type: 'string' } },
-        },
-        401: {
-          description: 'Unauthorized (authentication failed)',
-          type: 'object',
-          required: ['error'],
-          properties: { error: { type: 'string' } },
-        },
-      },
+    handler: async (request, reply) => {
+      try {
+        // Validate request body schema
+        const validation = gcpExpandRequestSchema.safeParse(request.body);
+        if (!validation.success) {
+          return reply.status(400).send({ error: validation.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = validation.data;
+
+        return expandHandler(request, reply);
+      } catch (error) {
+        console.error('Error in expand route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
     },
-    handler: expandHandler,
   });
 }
 

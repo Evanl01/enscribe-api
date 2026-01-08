@@ -45,14 +45,7 @@ export function makeRefreshCookie(wrapper, opts = {}) {
  */
 export async function signUp(email, password) {
   try {
-    if (!email || !password) {
-      return { success: false, error: 'Email and password are required' };
-    }
-
-    if (!email.includes('@')) {
-      return { success: false, error: `Invalid email format: ${email}` };
-    }
-
+    // Route validates email format and password requirements - trust the data
     const supabase = getSupabaseClient();
     const { data, error } = await supabase.auth.signUp({ email, password });
 
@@ -94,14 +87,7 @@ export async function signUp(email, password) {
  */
 export async function signIn(email, password) {
   try {
-    if (!email || !password) {
-      return { success: false, error: 'Email and password are required' };
-    }
-
-    if (!email.includes('@')) {
-      return { success: false, error: `Invalid email format: ${email}` };
-    }
-
+    // Route validates email format and password requirements - trust the data
     const supabase = getSupabaseClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 

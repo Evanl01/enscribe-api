@@ -148,6 +148,13 @@ async function runTranscriptsTests() {
       },
       expectedStatus: 400,
       expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        if (!data.error.message.includes('transcript_text')) return { valid: false, reason: 'Error message should mention transcript_text field' };
+        if (!data.error.message.includes('required')) return { valid: false, reason: 'Error message should mention required' };
+        return { valid: true };
+      },
     });
   }
 
@@ -164,6 +171,13 @@ async function runTranscriptsTests() {
       },
       expectedStatus: 400,
       expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        if (!data.error.message.includes('recording_id')) return { valid: false, reason: 'Error message should mention recording_id field' };
+        if (!data.error.message.includes('required')) return { valid: false, reason: 'Error message should mention required' };
+        return { valid: true };
+      },
     });
   }
 

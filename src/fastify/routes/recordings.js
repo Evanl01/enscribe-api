@@ -1,9 +1,10 @@
 /**
  * Recordings Routes
  * Handles all recording-related endpoints
+ * Validation is handled in routes using Zod schemas
  */
 import { getRecordingsAttachments, createRecording, getRecordings, deleteRecording } from '../controllers/recordingsController.js';
-import { recordingsAttachmentsQuerySchema } from '../schemas/requests.js';
+import { recordingsAttachmentsQuerySchema, recordingCreateRequestSchema } from '../schemas/requests.js';
 
 export async function registerRecordingsRoutes(fastify) {
   /**
@@ -37,7 +38,23 @@ export async function registerRecordingsRoutes(fastify) {
    */
   fastify.post('/recordings', {
     preHandler: [fastify.authenticate],
-    handler: createRecording,
+    handler: async (request, reply) => {
+      try {
+        // Validate request body
+        const parseResult = recordingCreateRequestSchema.safeParse(request.body);
+        if (!parseResult.success) {
+          return reply.status(400).send({ error: parseResult.error });
+        }
+
+        // Set validated body on request for controller
+        request.body = parseResult.data;
+
+        return createRecording(request, reply);
+      } catch (error) {
+        console.error('Error in recordings create route:', error);
+        return reply.status(500).send({ error: 'Internal server error' });
+      }
+    },
   });
 
   /**

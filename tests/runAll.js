@@ -12,6 +12,7 @@ import { runTranscriptsTests } from './transcripts.test.js';
 import { runSoapNotesTests } from './soap-notes.test.js';
 import { runAwsTests } from './aws.test.js';
 import { runGcpTests } from './gcp.test.js';
+import { runPromptLlmTests } from './prompt-llm.test.js';
 
 /**
  * Run all test suites
@@ -185,6 +186,25 @@ async function runAllTests() {
   } catch (error) {
     console.error('❌ GCP tests failed:', error.message);
     results.push({ suite: 'GCP Transcription', status: 'failed', error: error.message });
+  }
+
+  // Run OpenAI Prompt-LLM Tests
+  try {
+    console.log('\n' + '-'.repeat(70));
+    console.log('TEST SUITE 9: OPENAI PROMPT-LLM (SOAP NOTE GENERATION)');
+    console.log('-'.repeat(70) + '\n');
+    const promptLlmResult = await runPromptLlmTests();
+    results.push({ 
+      suite: 'OpenAI Prompt-LLM', 
+      status: 'completed',
+      tests: promptLlmResult?.total || 0,
+      passed: promptLlmResult?.passed || 0,
+      failed: promptLlmResult?.failed || 0,
+      passRate: promptLlmResult?.passRate || '0%'
+    });
+  } catch (error) {
+    console.error('❌ OpenAI Prompt-LLM tests failed:', error.message);
+    results.push({ suite: 'OpenAI Prompt-LLM', status: 'failed', error: error.message });
   }
 
   // Generate consolidated report

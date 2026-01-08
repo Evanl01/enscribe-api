@@ -3,7 +3,6 @@
  * Handles all transcript CRUD operations with encryption/decryption
  */
 import { getSupabaseClient } from '../../utils/supabase.js';
-import { transcriptCreateRequestSchema, transcriptUpdateRequestSchema } from '../schemas/requests.js';
 import * as encryptionUtils from '../../utils/encryptionUtils.js';
 
 const transcriptTable = 'transcripts';
@@ -199,13 +198,7 @@ export async function createTranscript(request, reply) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    // Validate request body
-    const parseResult = transcriptCreateRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({ error: parseResult.error });
-    }
-
-    const transcript = parseResult.data;
+    const transcript = request.body;
     transcript.user_id = user.id;
 
     if (!transcript.transcript_text || !transcript.recording_id) {

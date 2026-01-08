@@ -241,14 +241,7 @@ export async function createRecording(request, reply) {
       return reply.status(401).send({ error: 'Not authenticated' });
     }
 
-    const { patientEncounter_id, recording_file_path } = request.body || {};
-
-    // Validate required fields
-    if (!patientEncounter_id || !recording_file_path) {
-      return reply.status(400).send({ 
-        error: 'Missing required fields: patientEncounter_id, recording_file_path' 
-      });
-    }
+    const { patientEncounter_id, recording_file_path } = request.body;
 
     // Use the user's authenticated client with their authorization header
     const supabase = getSupabaseClient(request.headers.authorization);

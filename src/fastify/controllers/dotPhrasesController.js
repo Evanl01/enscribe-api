@@ -5,6 +5,19 @@ import { dotPhraseSchema } from '../schemas/dotPhrase.js';
 const dotPhrasesTable = 'dotPhrases';
 
 /**
+ * Helper: Validates bigint ID format
+ */
+function isValidBigInt(id) {
+  if (!id) return false;
+  try {
+    const parsed = BigInt(id);
+    return parsed > 0n;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
  * Generates a new AES key and encrypts it with RSA for storage.
  * Returns the encrypted AES key as base64 string.
  */
@@ -184,6 +197,10 @@ export async function getAllDotPhrasesForUser(userId, supabaseClient = null) {
  */
 export async function getOneDotPhrase(userId, dotPhraseId, supabase) {
   try {
+    if (!isValidBigInt(dotPhraseId)) {
+      return { success: false, error: 'Invalid dot phrase ID format', data: null };
+    }
+
     const { data, error } = await supabase
       .from(dotPhrasesTable)
       .select('*')
@@ -259,17 +276,12 @@ export async function createDotPhrase(userId, trigger, expansion, supabase) {
  */
 export async function updateDotPhrase(userId, dotPhraseId, updateData, supabase) {
   try {
-    if (!dotPhraseId) {
-      return { success: false, error: 'id is required for update', data: null };
+    if (!isValidBigInt(dotPhraseId)) {
+      return { success: false, error: 'Invalid dot phrase ID format', data: null };
     }
 
-    // Validate against schema
-    const parseResult = dotPhraseSchema.partial().safeParse(updateData);
-    if (!parseResult.success) {
-      return { success: false, error: parseResult.error.toString(), data: null };
-    }
-
-    const dotPhrase = parseResult.data;
+    // updateData is already validated by route, no need to validate again
+    const dotPhrase = updateData;
     dotPhrase.id = dotPhraseId;
     dotPhrase.user_id = userId; // Ensure user_id is set to the authenticated user's ID
 
@@ -327,8 +339,8 @@ export async function updateDotPhrase(userId, dotPhraseId, updateData, supabase)
  */
 export async function deleteDotPhrase(userId, dotPhraseId, supabase) {
   try {
-    if (!dotPhraseId) {
-      return { success: false, error: 'Dot phrase ID is required', data: null };
+    if (!isValidBigInt(dotPhraseId)) {
+      return { success: false, error: 'Invalid dot phrase ID format', data: null };
     }
 
     const { data, error } = await supabase
