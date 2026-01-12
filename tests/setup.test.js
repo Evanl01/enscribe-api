@@ -788,6 +788,111 @@ async function setupSoapNotes(accessToken, encounters) {
 }
 
 /**
+ * Setup Transcripts - Creates transcripts for recordings
+ * Checks first if transcript exists, only creates if missing
+ */
+async function setupTranscripts(accessToken, recordings) {
+  console.log('⚙️ Setting up test transcripts...');
+  
+  if (!recordings || recordings.length === 0) {
+    console.warn(`  ⚠️  No recordings available to create transcripts.\n`);
+    return [];
+  }
+  
+  const createdTranscripts = [];
+  
+  // Only process attached recordings (not null IDs)
+  const attachedRecordings = recordings.filter(r => r.attached && r.id !== null);
+  
+  if (attachedRecordings.length === 0) {
+    console.warn(`  ⚠️  No attached recordings found.\n`);
+    return [];
+  }
+  
+  console.log(`  Processing ${attachedRecordings.length} attached recording(s)...`);
+  
+  // Fetch all transcripts once (API doesn't support filtering)
+  let allTranscripts = [];
+  try {
+    const allTranscriptsResponse = await fetch('http://localhost:3001/api/transcripts', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (allTranscriptsResponse.ok) {
+      const data = await allTranscriptsResponse.json();
+      allTranscripts = Array.isArray(data) ? data : [];
+    }
+  } catch (error) {
+    console.warn(`  ⚠️  Error fetching all transcripts: ${error.message}`);
+  }
+  
+  for (const recording of attachedRecordings) {
+    try {
+      // Filter transcripts for this specific recording (client-side filtering)
+      const existingTranscripts = allTranscripts.filter(t => t.recording_id === recording.id);
+      const existingTranscript = existingTranscripts.length > 0 ? existingTranscripts[0] : null;
+      
+      if (existingTranscript) {
+        console.log(`  ⏭️  Transcript already exists for recording "${recording.filename}" (ID: ${existingTranscript.id})`);
+        createdTranscripts.push({
+          id: existingTranscript.id,
+          recordingId: recording.id,
+          filename: recording.filename,
+          encounterId: recording.encounterId,
+        });
+        continue;
+      }
+      
+      // Create new transcript with mock text
+      const mockTranscriptText = `This is a mock transcript for recording "${recording.filename}". 
+Doctor: Good morning, how are you feeling today?
+Patient: I'm feeling much better, thank you for asking.
+Doctor: That's great to hear. Let me examine you and we'll discuss the next steps.
+Patient: Sounds good.
+Doctor: Everything looks normal. Continue with your current medications and follow up in two weeks.
+Patient: Thank you, doctor. I appreciate your time.`;
+
+      const createResponse = await fetch('http://localhost:3001/api/transcripts', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recording_id: recording.id,
+          transcript_text: mockTranscriptText,
+        }),
+      });
+      
+      if (createResponse.ok) {
+        const created = await createResponse.json();
+        const transcriptId = created.id || created.data?.id;
+        
+        createdTranscripts.push({
+          id: transcriptId,
+          recordingId: recording.id,
+          filename: recording.filename,
+          encounterId: recording.encounterId,
+        });
+        
+        console.log(`  ✓ Created transcript for "${recording.filename}" (ID: ${transcriptId})`);
+      } else {
+        const error = await createResponse.json();
+        console.warn(`  ⚠️  Failed to create transcript for "${recording.filename}": ${error.error || createResponse.status}`);
+      }
+    } catch (error) {
+      console.warn(`  ⚠️  Error creating transcript for "${recording.filename}": ${error.message}`);
+    }
+  }
+  
+  console.log();
+  return createdTranscripts;
+}
+
+/**
  * Main setup function with smart duplicate detection
  */
 async function setupTestData() {
@@ -952,16 +1057,21 @@ async function setupTestData() {
     const recordingsResult = await setupTestRecordings(accessToken, supabase, userId);
     let createdEncounters = recordingsResult.encounters || [];
 
-    // ===== STEP 5: Setup DotPhrases (always runs) =====
-    console.log('Step 5: Setting up dotPhrases...');
+    console.log('Test recording ids:', recordingsResult.recordings.map(r => r.id).join(', '), '\n');
+    // ===== STEP 5: Setup Transcripts (creates transcripts for recordings) =====
+    console.log('Step 5: Setting up transcripts...');
+    const createdTranscripts = await setupTranscripts(accessToken, recordingsResult.recordings);
+
+    // ===== STEP 6: Setup DotPhrases (always runs) =====
+    console.log('Step 6: Setting up dotPhrases...');
     const createdDotPhrases = await setupDotPhrases(accessToken);
     
-    // ===== STEP 6: Setup SOAP Notes (always runs if encounters exist) =====
-    console.log('Step 6: Setting up SOAP notes...');
+    // ===== STEP 7: Setup SOAP Notes (always runs if encounters exist) =====
+    console.log('Step 7: Setting up SOAP notes...');
     const createdSoapNotes = await setupSoapNotes(accessToken, createdEncounters);
 
-    // ===== STEP 7: Save test data =====
-    console.log('Step 7: Saving test data...\n');
+    // ===== STEP 8: Save test data =====
+    console.log('Step 8: Saving test data...\n');
     
     // Use first 3 encounters for SOAP notes testing (as defined by SOAP notes setup)
     const firstThreeEncounters = createdEncounters.slice(0, 3);
@@ -983,6 +1093,7 @@ async function setupTestData() {
         name: e.name,
         index: i,
       })),
+      transcripts: createdTranscripts,
       dotPhrases: createdDotPhrases,
       soapNotes: {
         note: 'Created during setup - 3 SOAP notes: 2 attached to encounter 1, 1 attached to encounter 2',
@@ -1002,6 +1113,7 @@ async function setupTestData() {
     const attachedCount = recordingsResult.recordings.filter(r => r.attached).length;
     const unattachedCount = recordingsResult.recordings.filter(r => !r.attached).length;
     console.log(`  Recordings: ${recordingsResult.recordings.length} (${attachedCount} attached, ${unattachedCount} unattached)`);
+    console.log(`  Transcripts: ${createdTranscripts.length} created`);
     console.log(`  SOAP Notes: ${createdSoapNotes.length} created (3 expected)`);
     console.log(`  DotPhrases: ${createdDotPhrases.length} reconciled`);
     console.log(`  Storage: ${RECORDINGS_BUCKET} bucket`);
@@ -1009,7 +1121,8 @@ async function setupTestData() {
     console.log('\nYou can now run:');
     console.log('  npm run test:soap-notes   - Test the SOAP notes API');
     console.log('  npm run test:recordings    - Test the recordings API');
-    console.log('  npm run test:transcripts   - Test the transcripts API (creates transcripts)');
+    console.log('  npm run test:transcripts   - Test the transcripts API');
+    console.log('  npm run test:patient-encounters-transcript - Test patient encounter transcript endpoints');
     console.log('  npm test                   - Run all tests');
     console.log('  npm run test:teardown      - Clean up when done\n');
 

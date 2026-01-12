@@ -1,10 +1,14 @@
 /**
  * Test Suite: Patient Encounters API
  * Tests all patient encounter endpoints: CRUD operations, batch, complete, filtering
+ * Also includes transcript-related endpoints:
+ * - PATCH /api/patient-encounters/:id/transcript (transcript-only update)
+ * - PATCH /api/patient-encounters/:id/update-with-transcript (compound update with rollback)
  */
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 // Load .env.local
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,11 +17,85 @@ dotenv.config({ path: envPath });
 
 import { TestRunner } from './testUtils.js';
 import { getTestAccount, hasTestAccounts } from './testConfig.js';
+import { createClient } from '@supabase/supabase-js';
 
 const runner = new TestRunner('Patient Encounters API Tests');
 
 // Mock token for invalid auth tests
 const MOCK_TOKEN = 'invalid.token.here';
+
+// Load test data
+const TEST_DATA_FILE = path.resolve(__dirname, 'testData.json');
+let testData = null;
+
+function loadTestData() {
+  if (!fs.existsSync(TEST_DATA_FILE)) {
+    // Optional - not required for basic CRUD tests
+    return null;
+  }
+
+  try {
+    const data = fs.readFileSync(TEST_DATA_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.warn(`  ⚠️  Could not load testData.json: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Helper: Fetch real recording files from Supabase storage
+ * Returns the first available recording file path for use in tests
+ */
+async function getFirstRealRecordingFile(accessToken) {
+  try {
+    // Create authenticated Supabase client with the user's token
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        auth: { persistSession: false },
+        global: {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      }
+    );
+
+    // Get the current user from Supabase auth
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user || !user.id) {
+      console.warn('  ⚠️  Could not get user from token');
+      return null;
+    }
+
+    // List files in the user's directory in the audio-files bucket
+    const { data, error } = await supabase.storage
+      .from('audio-files')
+      .list(`${user.id}`, { limit: 100 });
+
+    if (error) {
+      console.warn(`  ⚠️  Error listing storage files: ${error.message}`);
+      return null;
+    }
+
+    // Get the first audio file
+    if (!data || data.length === 0) {
+      console.warn('  ⚠️  No recording files found in Supabase storage');
+      return null;
+    }
+
+    const firstFile = data[0];
+    const recordingPath = `${user.id}/${firstFile.name}`;
+    console.log(`  ✓ Using real recording file: ${recordingPath}`);
+    return recordingPath;
+  } catch (error) {
+    console.warn(`  ⚠️  Error fetching real recording file: ${error.message}`);
+    return null;
+  }
+}
 
 // Track created test data for cleanup
 const createdEncounterIds = [];
@@ -80,7 +158,8 @@ async function runPatientEncounterTests() {
   // Track suite-level count for cleanup verification
   let suiteCountBefore = null;
   let realAccessToken = null;
-  let createdEncounterIds = [];
+  let createdEncounterId = null;  // Current encounter ID for dependent tests
+  let createdEncounterIds = [];   // Array of all created IDs for cleanup
 
   // Get real token early if test account is configured
   if (hasTestAccounts()) {
@@ -173,9 +252,6 @@ async function runPatientEncounterTests() {
     if (testAccount && testAccount.email && testAccount.password) {
       console.log(`\n📝 Running real account tests with: ${testAccount.email.split('@')[0]}@****\n`);
 
-      let accessToken = null;
-      let createdEncounterId = null;
-
       // First: Sign-in to get access token
       console.log('  [Setup] Signing in to get access token...\n');
       try {
@@ -191,7 +267,7 @@ async function runPatientEncounterTests() {
         const signInResponse = await response.json();
 
         if (signInResponse && signInResponse.token && signInResponse.token.access_token) {
-          accessToken = signInResponse.token.access_token;
+          realAccessToken = signInResponse.token.access_token;
           console.log('  ✅ Successfully obtained access token\n');
           
           // Get initial count before any tests create data
@@ -199,7 +275,7 @@ async function runPatientEncounterTests() {
             const getCountResponse = await fetch(`${runner.baseUrl}/api/patient-encounters`, {
               method: 'GET',
               headers: {
-                Authorization: `Bearer ${accessToken}`,
+                Authorization: `Bearer ${realAccessToken}`,
               },
             });
             const countData = await getCountResponse.json();
@@ -215,13 +291,13 @@ async function runPatientEncounterTests() {
         console.log('  ⚠️  Sign-in failed:', error.message, '\n');
       }
 
-      if (accessToken) {
+      if (realAccessToken) {
         // ===== TEST 7: Get patient encounters (authenticated user) =====
         await runner.test('Test 7: Get patient encounters (authenticated user)', {
           method: 'GET',
           endpoint: '/api/patient-encounters',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 200,
         });
@@ -234,7 +310,7 @@ async function runPatientEncounterTests() {
             name: 'Integration Test Patient',
           },
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 201,
           expectedFields: ['id', 'name', 'created_at', 'updated_at', 'user_id'],
@@ -253,7 +329,7 @@ async function runPatientEncounterTests() {
           method: 'GET',
           endpoint: '/api/patient-encounters?limit=5&offset=0',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 200,
         });
@@ -268,7 +344,7 @@ async function runPatientEncounterTests() {
               name: 'Updated Integration Test Patient',
             },
             headers: {
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${realAccessToken}`,
             },
             expectedStatus: 200,
             expectedFields: ['id', 'name', 'updated_at'],
@@ -286,7 +362,7 @@ async function runPatientEncounterTests() {
             method: 'DELETE',
             endpoint: `/api/patient-encounters/${createdEncounterId}`,
             headers: {
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${realAccessToken}`,
             },
             expectedStatus: 200,
           });
@@ -299,7 +375,7 @@ async function runPatientEncounterTests() {
           method: 'GET',
           endpoint: '/api/patient-encounters/invalid-id-format',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 400,
           validator: (data) => {
@@ -314,7 +390,7 @@ async function runPatientEncounterTests() {
           method: 'GET',
           endpoint: '/api/patient-encounters/999999999999',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 404,
         });
@@ -323,15 +399,22 @@ async function runPatientEncounterTests() {
 
         // ===== TEST 14: Create complete patient encounter bundle (with all linked data) =====
         // This test creates a new encounter with recording, transcript, and SOAP note in one request
-        const completeBundle = {
+        // First, fetch a real recording file from Supabase storage
+        let realRecordingPath = null;
+        if (realAccessToken) {
+          realRecordingPath = await getFirstRealRecordingFile(realAccessToken);
+        }
+
+        // Default bundle for tests that don't need real recording files (e.g., auth tests)
+        let completeBundle = {
           patientEncounter: {
             name: 'Complete Bundle Test Patient',
           },
           recording: {
-            recording_file_name: 'test-recording-' + Date.now() + '.wav',
+            recording_file_name: 'default-recording.wav',
             recording_duration: 300,
             recording_file_size: 2400000,
-            recording_file_path: '/test-recordings/test-' + Date.now() + '.wav',
+            recording_file_path: '/test-recordings/default.wav',
           },
           transcript: {
             transcript_text: 'This is a test transcript for the complete bundle test.',
@@ -348,15 +431,44 @@ async function runPatientEncounterTests() {
           },
         };
 
-        let completeBundleEncounterId = null;
-        await runner.test('Test 14: Create complete patient encounter bundle (POST)', {
-          method: 'POST',
-          endpoint: '/api/patient-encounters/complete',
-          body: completeBundle,
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
+        if (!realRecordingPath) {
+          console.log('⊘ Test 14: SKIPPED (No real recording files found in Supabase storage)\n');
+        } else {
+          // Update completeBundle with the real recording file for Test 14
+          completeBundle = {
+            patientEncounter: {
+              name: 'Complete Bundle Test Patient',
+            },
+            recording: {
+              recording_file_name: realRecordingPath.split('/').pop(),
+              recording_duration: 300,
+              recording_file_size: 2400000,
+              recording_file_path: realRecordingPath,
+            },
+            transcript: {
+              transcript_text: 'This is a test transcript for the complete bundle test.',
+              confidence_score: 0.95,
+            },
+            soapNote_text: {
+              soapNote: {
+                subjective: 'Patient reports feeling better',
+                objective: 'Vital signs stable',
+                assessment: 'Improvement noted',
+                plan: 'Continue current treatment',
+              },
+              billingSuggestion: 'CPT 99214',
+            },
+          };
+
+          let completeBundleEncounterId = null;
+          await runner.test('Test 14: Create complete patient encounter bundle (POST)', {
+            method: 'POST',
+            endpoint: '/api/patient-encounters/complete',
+            body: completeBundle,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${realAccessToken}`,
+            },
           expectedStatus: 201,
           expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNote'],
           onSuccess: (data) => {
@@ -367,21 +479,21 @@ async function runPatientEncounterTests() {
               console.log(`    Created complete bundle encounter ID: ${completeBundleEncounterId}`);
             }
           },
-        });
+          });
 
-        // ===== TEST 15: Get the created complete bundle (GET) =====
-        if (completeBundleEncounterId) {
-          await runner.test('Test 15: Get complete patient encounter bundle (verify creation)', {
-            method: 'GET',
-            endpoint: `/api/patient-encounters/complete/${completeBundleEncounterId}`,
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            expectedStatus: 200,
+          // ===== TEST 15: Get the created complete bundle (GET) =====
+          if (completeBundleEncounterId) {
+            await runner.test('Test 15: Get complete patient encounter bundle (verify creation)', {
+              method: 'GET',
+              endpoint: `/api/patient-encounters/complete/${completeBundleEncounterId}`,
+              headers: {
+                Authorization: `Bearer ${realAccessToken}`,
+              },
+              expectedStatus: 200,
             expectedFields: ['patientEncounter', 'recording', 'transcript', 'soapNotes'],
-            onSuccess: (data) => {
+            customValidator: (data) => {
               // Print full response for debugging
-              console.log(`\n    📋 Full Test 17 Response:\n${JSON.stringify(data, null, 2)}\n`);
+              console.log(`\n    📋 Full Test 15 Response:\n${JSON.stringify(data, null, 2)}\n`);
               
               // Check for encryption fields that should be cleaned
               if (data.patientEncounter) {
@@ -397,27 +509,76 @@ async function runPatientEncounterTests() {
               
               // Check for proper field names
               if (data.patientEncounter && !data.patientEncounter.name && data.patientEncounter.encrypted_name) {
-                console.log(`    ⚠️  WARNING: Found encrypted_name instead of name`);
+                return { passed: false, message: 'Found encrypted_name instead of name - decryption failed' };
               }
               if (data.transcript && !data.transcript.transcript_text && data.transcript.encrypted_transcript) {
-                console.log(`    ⚠️  WARNING: Found encrypted_transcript instead of transcript_text`);
+                return { passed: false, message: 'Found encrypted_transcript instead of transcript_text - decryption failed' };
               }
+              
+              // ===== STRICT VALIDATION: Signed URL Generation =====
+              // Validate that the signed URL was generated and refreshed
+              if (!data.recording) {
+                return { passed: false, message: 'Missing recording object' };
+              }
+              
+              const recording = data.recording;
+              
+              // Check signed URL exists (should be auto-generated in Step 1.5)
+              if (!recording.recording_file_signed_url) {
+                return { passed: false, message: 'Recording missing recording_file_signed_url (should be auto-generated in getCompletePatientEncounter)' };
+              }
+              
+              // Check signed URL is valid (contains Supabase domain)
+              if (!recording.recording_file_signed_url.includes('supabase.co')) {
+                return { passed: false, message: 'Signed URL does not appear valid (missing supabase.co domain)' };
+              }
+              
+              // Check signed URL is HTTPS
+              if (!recording.recording_file_signed_url.startsWith('https://')) {
+                return { passed: false, message: 'Signed URL must be HTTPS' };
+              }
+              
+              // Check expiry timestamp exists
+              if (!recording.recording_file_signed_url_expiry) {
+                return { passed: false, message: 'Recording missing recording_file_signed_url_expiry (should be set with signed URL)' };
+              }
+              
+              // Check expiry is fresh (not in the past)
+              const expiryDate = new Date(recording.recording_file_signed_url_expiry);
+              const now = new Date();
+              if (isNaN(expiryDate.getTime())) {
+                return { passed: false, message: 'Signed URL expiry is not a valid date: ' + recording.recording_file_signed_url_expiry };
+              }
+              if (expiryDate <= now) {
+                return { passed: false, message: 'Signed URL is already expired (expiry: ' + recording.recording_file_signed_url_expiry + ')' };
+              }
+              
+              // Check file path exists
+              if (!recording.recording_file_path) {
+                return { passed: false, message: 'Recording missing recording_file_path' };
+              }
+              
+              console.log(`    ✓ Recording has valid signed URL: ${recording.recording_file_signed_url.substring(0, 100)}...`);
+              console.log(`    ✓ Signed URL expires at: ${recording.recording_file_signed_url_expiry}`);
+              
+              return { passed: true, message: 'Recording has valid signed URL and expiry (Step 1.5 working correctly)' };
             },
-          });
-        }
+            });
+          }
 
-        // ===== TEST 16: DELETE complete encounter (DEPENDENT ON TEST 15) =====
-        if (completeBundleEncounterId) {
-          await runner.test('Test 16: DELETE complete encounter (DEPENDENT ON TEST 15)', {
-            method: 'DELETE',
-            endpoint: `/api/patient-encounters/${completeBundleEncounterId}`,
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            expectedStatus: 200,
-          });
-        } else {
-          console.log('⊘ Test 16: SKIPPED (Test 15 dependency failed - no complete bundle encounter created)\n');
+          // ===== TEST 16: DELETE complete encounter (DEPENDENT ON TEST 15) =====
+          if (completeBundleEncounterId) {
+            await runner.test('Test 16: DELETE complete encounter (DEPENDENT ON TEST 15)', {
+              method: 'DELETE',
+              endpoint: `/api/patient-encounters/${completeBundleEncounterId}`,
+              headers: {
+                Authorization: `Bearer ${realAccessToken}`,
+              },
+              expectedStatus: 200,
+            });
+          } else {
+            console.log('⊘ Test 16: SKIPPED (Test 15 dependency failed - no complete bundle encounter created)\n');
+          }
         }
 
         // ===== TEST 17: Missing required field validation =====
@@ -450,7 +611,7 @@ async function runPatientEncounterTests() {
           },
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 400,
           validator: (data) => {
@@ -484,7 +645,7 @@ async function runPatientEncounterTests() {
           },
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 400,
           validator: (data) => {
@@ -509,7 +670,7 @@ async function runPatientEncounterTests() {
           method: 'GET',
           endpoint: '/api/patient-encounters/complete/invalid-format',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 400,
           validator: (data) => {
@@ -524,7 +685,7 @@ async function runPatientEncounterTests() {
           method: 'GET',
           endpoint: '/api/patient-encounters/complete/999999999999',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${realAccessToken}`,
           },
           expectedStatus: 404,
         });
@@ -541,6 +702,431 @@ async function runPatientEncounterTests() {
     console.log('\n⚠️  Test accounts not configured. Skipping real credential tests.');
     console.log('To enable: Add TEST_ACCOUNT_EMAIL and TEST_ACCOUNT_PASSWORD to .env.local\n');
   }
+
+  // ========================================
+  // TRANSCRIPT ENDPOINT TESTS
+  // ========================================
+  console.log('\n═══════════════════════════════════════════════════════');
+  console.log('📋 Patient Encounter Transcript Tests');
+  console.log('═══════════════════════════════════════════════════════\n');
+
+  // Load test data for transcript tests
+  testData = loadTestData();
+  let testEncounterId = null;
+  let testTranscriptId = null;
+
+  if (testData) {
+    if (testData.encounters && testData.encounters.length > 0) {
+      testEncounterId = testData.encounters[0].id;
+      console.log(`✓ Found test encounter ID from testData.json: ${testEncounterId}`);
+    }
+    
+    if (testData.transcripts && testData.transcripts.length > 0) {
+      testTranscriptId = testData.transcripts[0].id;
+      console.log(`✓ Found test transcript ID from testData.json: ${testTranscriptId}\n`);
+    }
+  } else {
+    console.log('⚠️  testData.json not available. Run setup first: npm run test:setup\n');
+  }
+
+  // ========================================
+  // PATCH /patient-encounters/:id/transcript
+  // ========================================
+
+  // Test 23: PATCH /patient-encounters/:id/transcript without auth
+  if (testEncounterId) {
+    await runner.test('Test 23: PATCH /patient-encounters/:id/transcript without auth (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/transcript`,
+      body: {
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 401,
+      expectedFields: ['error'],
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 23: PATCH /patient-encounters/:id/transcript without auth (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No test encounter available (run npm run test:setup)',
+      testNumber: 23,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 23: PATCH /patient-encounters/:id/transcript without auth');
+    console.log('    ⚠️  SKIPPED: No test encounter available (run npm run test:setup)');
+  }
+
+  // Test 24: PATCH /patient-encounters/:id/transcript with invalid token
+  if (testEncounterId) {
+    await runner.test('Test 24: PATCH /patient-encounters/:id/transcript with invalid token (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/transcript`,
+      headers: {
+        Authorization: `Bearer ${MOCK_TOKEN}`,
+      },
+      body: {
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 401,
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 24: PATCH /patient-encounters/:id/transcript with invalid token (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No test encounter available',
+      testNumber: 24,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 24: PATCH /patient-encounters/:id/transcript with invalid token');
+    console.log('    ⚠️  SKIPPED: No test encounter available');
+  }
+
+  // Test 25: PATCH /patient-encounters/:id/transcript - missing transcript_text
+  if (realAccessToken && testEncounterId) {
+    await runner.test('Test 25: PATCH /patient-encounters/:id/transcript with missing transcript_text (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {},
+      expectedStatus: 400,
+      expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        if (!data.error.message.includes('transcript_text')) return { valid: false, reason: 'Error message should mention transcript_text field' };
+        return { valid: true };
+      },
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 25: PATCH /patient-encounters/:id/transcript with missing transcript_text (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 400,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token or encounter ID',
+      testNumber: 25,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 25: PATCH /patient-encounters/:id/transcript with missing transcript_text');
+    console.log('    ⚠️  SKIPPED: Missing auth token or encounter ID');
+  }
+
+  // Test 26: PATCH /patient-encounters/:id/transcript - valid update
+  if (realAccessToken && testEncounterId && testTranscriptId) {
+    await runner.test('Test 26: PATCH /patient-encounters/:id/transcript with valid update (should succeed)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        transcript_text: 'Updated transcript text for testing with new content.',
+      },
+      expectedStatus: 200,
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 26: PATCH /patient-encounters/:id/transcript with valid update (should succeed)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 200,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token, encounter ID, or transcript ID',
+      testNumber: 26,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 26: PATCH /patient-encounters/:id/transcript with valid update');
+    console.log('    ⚠️  SKIPPED: Missing auth token, encounter ID, or transcript ID');
+  }
+
+  // Test 27: PATCH /patient-encounters/:id/transcript - not found
+  if (realAccessToken) {
+    await runner.test('Test 27: PATCH /patient-encounters/:id/transcript with non-existent ID (should fail)', {
+      method: 'PATCH',
+      endpoint: '/api/patient-encounters/99999/transcript',
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        transcript_text: 'Update text',
+      },
+      expectedStatus: 404,
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 27: PATCH /patient-encounters/:id/transcript with non-existent ID (should fail)',
+      passed: false,
+      endpoint: '/api/patient-encounters/99999/transcript',
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 404,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token',
+      testNumber: 27,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 27: PATCH /patient-encounters/:id/transcript with non-existent ID');
+    console.log('    ⚠️  SKIPPED: Missing auth token');
+  }
+
+  // ======================================================
+  // PATCH /patient-encounters/:id/update-with-transcript
+  // ======================================================
+
+  // Test 28: PATCH /patient-encounters/:id/update-with-transcript without auth
+  if (testEncounterId) {
+    await runner.test('Test 28: PATCH /patient-encounters/:id/update-with-transcript without auth (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      body: {
+        name: 'Updated Name',
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 401,
+      expectedFields: ['error'],
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 28: PATCH /patient-encounters/:id/update-with-transcript without auth (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No test encounter available',
+      testNumber: 28,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 28: PATCH /patient-encounters/:id/update-with-transcript without auth');
+    console.log('    ⚠️  SKIPPED: No test encounter available');
+  }
+
+  // Test 29: PATCH /patient-encounters/:id/update-with-transcript with invalid token
+  if (testEncounterId) {
+    await runner.test('Test 29: PATCH /patient-encounters/:id/update-with-transcript with invalid token (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      headers: {
+        Authorization: `Bearer ${MOCK_TOKEN}`,
+      },
+      body: {
+        name: 'Updated Name',
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 401,
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 29: PATCH /patient-encounters/:id/update-with-transcript with invalid token (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 401,
+      body: {},
+      customMessage: '⚠️  SKIPPED: No test encounter available',
+      testNumber: 29,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 29: PATCH /patient-encounters/:id/update-with-transcript with invalid token');
+    console.log('    ⚠️  SKIPPED: No test encounter available');
+  }
+
+  // Test 30: PATCH /patient-encounters/:id/update-with-transcript - missing both fields
+  if (realAccessToken && testEncounterId) {
+    await runner.test('Test 30: PATCH /patient-encounters/:id/update-with-transcript with missing both fields (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {},
+      expectedStatus: 400,
+      expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        return { valid: true };
+      },
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 30: PATCH /patient-encounters/:id/update-with-transcript with missing both fields (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 400,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token or encounter ID',
+      testNumber: 30,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 30: PATCH /patient-encounters/:id/update-with-transcript with missing both fields');
+    console.log('    ⚠️  SKIPPED: Missing auth token or encounter ID');
+  }
+
+  // Test 31: PATCH /patient-encounters/:id/update-with-transcript - missing name
+  if (realAccessToken && testEncounterId) {
+    await runner.test('Test 31: PATCH /patient-encounters/:id/update-with-transcript with missing name (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        if (!data.error.message.includes('name')) return { valid: false, reason: 'Error message should mention name field' };
+        return { valid: true };
+      },
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 31: PATCH /patient-encounters/:id/update-with-transcript with missing name (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 400,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token or encounter ID',
+      testNumber: 31,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 31: PATCH /patient-encounters/:id/update-with-transcript with missing name');
+    console.log('    ⚠️  SKIPPED: Missing auth token or encounter ID');
+  }
+
+  // Test 32: PATCH /patient-encounters/:id/update-with-transcript - missing transcript_text
+  if (realAccessToken && testEncounterId) {
+    await runner.test('Test 32: PATCH /patient-encounters/:id/update-with-transcript with missing transcript_text (should fail)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        name: 'Updated Name',
+      },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+      validator: (data) => {
+        if (!data.error) return { valid: false, reason: 'Missing error field' };
+        if (data.error.name !== 'ZodError') return { valid: false, reason: `Expected ZodError, got ${data.error.name}` };
+        if (!data.error.message.includes('transcript_text')) return { valid: false, reason: 'Error message should mention transcript_text field' };
+        return { valid: true };
+      },
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 32: PATCH /patient-encounters/:id/update-with-transcript with missing transcript_text (should fail)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 400,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token or encounter ID',
+      testNumber: 32,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 32: PATCH /patient-encounters/:id/update-with-transcript with missing transcript_text');
+    console.log('    ⚠️  SKIPPED: Missing auth token or encounter ID');
+  }
+
+  // Test 33: PATCH /patient-encounters/:id/update-with-transcript - valid compound update
+  if (realAccessToken && testEncounterId) {
+    await runner.test('Test 33: PATCH /patient-encounters/:id/update-with-transcript with valid compound update (should succeed)', {
+      method: 'PATCH',
+      endpoint: `/api/patient-encounters/${testEncounterId}/update-with-transcript`,
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        name: 'Updated Encounter Name',
+        transcript_text: 'Updated transcript text with both fields.',
+      },
+      expectedStatus: 200,
+      validator: (data) => {
+        if (!data.success) return { valid: false, reason: 'Expected success: true' };
+        if (!data.data) return { valid: false, reason: 'Expected data object' };
+        if (!data.data.patientEncounter) return { valid: false, reason: 'Expected patientEncounter in data' };
+        if (!data.data.transcript) return { valid: false, reason: 'Expected transcript in data' };
+        return { valid: true };
+      },
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 33: PATCH /patient-encounters/:id/update-with-transcript with valid compound update (should succeed)',
+      passed: false,
+      endpoint: `/api/patient-encounters/[id]/update-with-transcript`,
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 200,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token or encounter ID',
+      testNumber: 33,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 33: PATCH /patient-encounters/:id/update-with-transcript with valid compound update');
+    console.log('    ⚠️  SKIPPED: Missing auth token or encounter ID');
+  }
+
+  // Test 34: PATCH /patient-encounters/:id/update-with-transcript - not found
+  if (realAccessToken) {
+    await runner.test('Test 34: PATCH /patient-encounters/:id/update-with-transcript with non-existent ID (should fail)', {
+      method: 'PATCH',
+      endpoint: '/api/patient-encounters/99999/update-with-transcript',
+      headers: {
+        Authorization: `Bearer ${realAccessToken}`,
+      },
+      body: {
+        name: 'Updated Name',
+        transcript_text: 'Updated transcript text',
+      },
+      expectedStatus: 404,
+    });
+  } else {
+    runner.results.push({
+      name: 'Test 34: PATCH /patient-encounters/:id/update-with-transcript with non-existent ID (should fail)',
+      passed: false,
+      endpoint: '/api/patient-encounters/99999/update-with-transcript',
+      method: 'PATCH',
+      status: null,
+      expectedStatus: 404,
+      body: {},
+      customMessage: '⚠️  SKIPPED: Missing auth token',
+      testNumber: 34,
+      timestamp: new Date().toISOString(),
+    });
+    console.log('\n⚠️  Test 34: PATCH /patient-encounters/:id/update-with-transcript with non-existent ID');
+    console.log('    ⚠️  SKIPPED: Missing auth token');
+  }
+
   console.log('\n═══════════════════════════════════════════════════════');
   console.log('🧹 Test Suite Cleanup');
   console.log('═══════════════════════════════════════════════════════\n');

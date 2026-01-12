@@ -377,7 +377,7 @@ async function runAllPromptLlmTests() {
   console.log('   Process: Audio → Transcribe (GCP) → Expand dot phrases → Mask PHI (AWS) → Generate SOAP (OpenAI o3)\n');
   
   // Use makePromptLlmRequest for proper SSE streaming support
-  const soapResponse = await makePromptLlmRequest('POST', '/api/prompt-llms', 
+  const soapResponse = await makePromptLlmRequest('POST', '/api/prompt-llm', 
     { recording_file_path: recording.path },
     { Authorization: `Bearer ${accessToken}` }
   );
@@ -390,15 +390,24 @@ async function runAllPromptLlmTests() {
   } else if (!Array.isArray(soapResponse.body) || soapResponse.body.length === 0) {
     test4Message = 'No SSE events received';
   } else {
-    const finalEvent = soapResponse.body.find(e => e.status === 'soap note complete');
-    if (!finalEvent) {
-      test4Message = 'No completion event received';
-    } else if (!finalEvent.data) {
-      test4Message = 'Completion event has no data';
+    // Validate transcription complete event contains transcript data
+    const transcriptionEvent = soapResponse.body.find(e => e.status === 'transcription complete');
+    if (!transcriptionEvent) {
+      test4Message = 'No transcription complete event received';
+    } else if (!transcriptionEvent.data?.transcript) {
+      test4Message = 'Transcription complete event missing transcript data (expandedTranscript was undefined)';
     } else {
-      cachedSoapResponse = finalEvent.data;
-      test4Passed = true;
-      test4Message = 'Received complete SOAP response';
+      // Validate final SOAP note complete event
+      const finalEvent = soapResponse.body.find(e => e.status === 'soap note complete');
+      if (!finalEvent) {
+        test4Message = 'No completion event received';
+      } else if (!finalEvent.data) {
+        test4Message = 'Completion event has no data';
+      } else {
+        cachedSoapResponse = finalEvent.data;
+        test4Passed = true;
+        test4Message = 'Received complete SOAP response with transcript data';
+      }
     }
   }
   

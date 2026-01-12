@@ -1,4 +1,4 @@
-import * as encryptionUtils from '@/src/utils/encryptionUtils';
+import * as encryptionUtils from './encryptionUtils.js';
 
 const patientEncounterTable = 'patientEncounters';
 
@@ -72,20 +72,35 @@ export async function getPatientEncounterWithTranscript(supabase, patientEncount
         }
         
         const { data: patientEncounter, aes_key, iv } = encounterResult;
+        console.log('[src/utils/patientEncounterUtils.js] Fetched patient encounter:', patientEncounter);
         
-        if (!patientEncounter.recording_id) {
+        // Step 2: Fetch recording linked to this patient encounter
+        const { data: recording, error: recordingError } = await supabase
+            .from('recordings')
+            .select('id')
+            .eq('patientEncounter_id', patientEncounterId)
+            .single();
+        
+        if (recordingError) {
+            if (recordingError.code === 'PGRST116') {
+                return { 
+                    success: false, 
+                    error: 'Patient encounter has no associated recording',
+                    statusCode: 400
+                };
+            }
             return { 
                 success: false, 
-                error: 'Patient encounter has no associated recording',
-                statusCode: 400
+                error: 'Failed to fetch recording: ' + recordingError.message,
+                statusCode: 500
             };
         }
         
-        // Step 2: Fetch transcript
+        // Step 3: Fetch transcript
         const { data: transcript, error: transcriptError } = await supabase
             .from('transcripts')
             .select('*')
-            .eq('recording_id', patientEncounter.recording_id)
+            .eq('recording_id', recording.id)
             .single();
         
         if (transcriptError && transcriptError.code !== 'PGRST116') {

@@ -5,8 +5,11 @@
  */
 import { getSupabaseClient } from '../../utils/supabase.js';
 import * as encryptionUtils from '../../utils/encryptionUtils.js';
+import { getPatientEncounterWithDecryptedKey } from '../../utils/patientEncounterUtils.js';
 
 const patientEncounterTable = 'patientEncounters';
+const recordingTable = 'recordings';
+const transcriptTable = 'transcripts';
 
 /**
  * Helper: Validates bigint ID format
@@ -390,6 +393,7 @@ export async function getCompletePatientEncounter(request, reply) {
     delete encounterData.iv;
 
     // Step 1: Fetch recording linked to encounter
+    console.log('Step 1: Fetching recording linked to encounterId:', encounterId);
     const { data: recordingData, error: recordingError } = await supabase
       .from('recordings')
       .select('*')
@@ -398,15 +402,70 @@ export async function getCompletePatientEncounter(request, reply) {
 
     let recording = null;
     if (recordingError && recordingError.code !== 'PGRST116') {
+      console.error('Recording query error:', recordingError);
       return reply.status(500).send({ error: recordingError.message });
     } else if (recordingData) {
       recording = recordingData;
       delete recording.iv;
+    } else if (recordingError?.code === 'PGRST116') {
+      console.warn('No recording found for encounterId:', encounterId, 'RLS may have filtered the result or no recording linked');
+    }
+
+    // Step 1.5: Generate/refresh signed URL if needed
+    if (recording && recording.recording_file_path) {
+      const needNewSignedUrl = !recording.recording_file_signed_url || 
+                               new Date(recording.recording_file_signed_url_expiry) < new Date();
+      
+      if (needNewSignedUrl) {
+        console.log('Step 1.5: Generating signed URL for recording file');
+        
+        // Normalize path: strip optional bucket prefix and any leading slash
+        let normalizedPath = recording.recording_file_path;
+        if (normalizedPath.startsWith('audio-files/')) {
+          normalizedPath = normalizedPath.replace(/^audio-files\//, '');
+        }
+        if (normalizedPath.startsWith('/')) normalizedPath = normalizedPath.slice(1);
+        
+        console.log('Creating signed URL for recording file:', normalizedPath);
+        const expirySeconds = 60 * 60; // 1 hour
+        
+        const { data: signedUrlData, error: signedError } = await supabase.storage
+          .from('audio-files')
+          .createSignedUrl(normalizedPath, expirySeconds);
+        
+        if (signedError) {
+          console.error('Signed URL error:', signedError);
+          return reply.status(500).send({ error: 'Failed to create signed URL: ' + signedError.message });
+        }
+        
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + expirySeconds * 1000).toISOString();
+        
+        recording.recording_file_signed_url = signedUrlData.signedUrl;
+        recording.recording_file_signed_url_expiry = expiresAt;
+        
+        // Update recording row in database
+        const { data: updateData, error: updateError } = await supabase
+          .from('recordings')
+          .update({
+            recording_file_signed_url: recording.recording_file_signed_url,
+            recording_file_signed_url_expiry: recording.recording_file_signed_url_expiry
+          })
+          .eq('id', recording.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('Error updating recording\'s file signed URL:', updateError.message);
+          return reply.status(500).send({ error: updateError.message });
+        }
+      }
     }
 
     // Step 2: Fetch transcript for recording
     let transcript = null;
     if (recording) {
+      console.log('Step 2: Fetching transcript for recording_id:', recording.id);
       const { data: transcriptData, error: transcriptError } = await supabase
         .from('transcripts')
         .select('*')
@@ -431,6 +490,7 @@ export async function getCompletePatientEncounter(request, reply) {
     }
 
     // Step 3: Fetch SOAP notes for encounter
+    console.log('Step 3: Fetching SOAP notes for encounterId:', encounterId);
     const { data: soapNotes, error: soapError } = await supabase
       .from('soapNotes')
       .select('*')
@@ -705,5 +765,271 @@ export async function completePatientEncounter(request, reply) {
     }
 
     return reply.status(500).send({ error: errorMessage });
+  }
+}
+
+/**
+ * Update transcript for a patient encounter
+ * PATCH /api/patient-encounters/:id/transcript
+ * Requires: transcript_text
+ */
+export async function updatePatientEncounterTranscript(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { id: patientEncounterId } = request.params;
+
+    if (!patientEncounterId || isNaN(patientEncounterId)) {
+      return reply.status(400).send({ error: 'Valid Patient Encounter ID is required' });
+    }
+
+    const { transcript_text } = request.body;
+
+    // Step 1: Fetch patient encounter with decrypted AES key
+    const encounterResult = await getPatientEncounterWithDecryptedKey(supabase, patientEncounterId);
+    if (!encounterResult.success) {
+      return reply.status(encounterResult.statusCode).send({ error: encounterResult.error });
+    }
+
+    const { data: patientEncounter } = encounterResult;
+    console.log('[fastify/controllers/patientEncountersController.js] Fetched patient encounter for transcript update:', patientEncounter);
+
+    // Step 2: Fetch recording linked to this patient encounter
+    const { data: recording, error: recordingError } = await supabase
+      .from(recordingTable)
+      .select('id')
+      .eq('patientEncounter_id', patientEncounterId)
+      .single();
+
+    if (recordingError) {
+      if (recordingError.code === 'PGRST116') {
+        return reply.status(400).send({ error: 'Patient encounter has no associated recording' });
+      }
+      return reply.status(500).send({ error: 'Failed to fetch recording: ' + recordingError.message });
+    }
+
+    // Step 3: Prepare transcript object for encryption with new IV
+    const transcript = {
+      transcript_text: transcript_text,
+    };
+
+    // Encrypt transcript_text (generates new IV)
+    const encryptionResult = encryptionUtils.encryptField(transcript, 'transcript_text', patientEncounter.encrypted_aes_key);
+    if (!encryptionResult.success) {
+      return reply.status(500).send({ error: 'Failed to encrypt transcript: ' + encryptionResult.error });
+    }
+
+    // Step 4: Check if transcript exists for this recording
+    const { data: existingTranscript, error: fetchTranscriptError } = await supabase
+      .from(transcriptTable)
+      .select('id')
+      .eq('recording_id', recording.id)
+      .single();
+
+    if (fetchTranscriptError) {
+      if (fetchTranscriptError.code === 'PGRST116') {
+        return reply.status(404).send({ error: 'No transcript to update. Create a transcript first.' });
+      }
+      return reply.status(500).send({ error: 'Failed to query transcript: ' + fetchTranscriptError.message });
+    }
+
+    // Step 5: Update existing transcript with new encrypted text and IV
+    const { data: updateResult, error: updateError } = await supabase
+      .from(transcriptTable)
+      .update({
+        encrypted_transcript_text: transcript.encrypted_transcript_text,
+        iv: transcript.iv,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingTranscript.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return reply.status(500).send({ error: 'Failed to update transcript: ' + updateError.message });
+    }
+
+    return reply.status(200).send(updateResult);
+  } catch (error) {
+    console.error('Error updating patient encounter transcript:', error);
+    return reply.status(500).send({ error: error.message });
+  }
+}
+
+/**
+ * Update patient encounter and transcript together (compound update with rollback)
+ * PATCH /api/patient-encounters/:id/update-with-transcript
+ * Requires: name AND transcript_text
+ */
+export async function updatePatientEncounterWithTranscript(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { id: patientEncounterId } = request.params;
+
+    if (!patientEncounterId || isNaN(patientEncounterId)) {
+      return reply.status(400).send({ error: 'Valid Patient Encounter ID is required' });
+    }
+
+    const { name, transcript_text } = request.body;
+
+    // Step 1: Fetch patient encounter with decrypted AES key
+    const encounterResult = await getPatientEncounterWithDecryptedKey(supabase, patientEncounterId);
+    if (!encounterResult.success) {
+      return reply.status(encounterResult.statusCode).send({ error: encounterResult.error });
+    }
+
+    const { data: patientEncounter } = encounterResult;
+
+    // Store original encrypted name for rollback
+    const originalEncryptedName = patientEncounter.encrypted_name;
+    const originalIv = patientEncounter.iv;
+
+    // Step 2: Fetch recording linked to this patient encounter
+    const { data: recording, error: recordingError } = await supabase
+      .from(recordingTable)
+      .select('id')
+      .eq('patientEncounter_id', patientEncounterId)
+      .single();
+
+    if (recordingError) {
+      return reply.status(400).send({ error: 'No recording found for this patient encounter' });
+    }
+
+    // Step 3: Prepare patient encounter update (encrypt name)
+    const encounterObj = { name };
+    const encryptionResult = encryptionUtils.encryptField(encounterObj, 'name', patientEncounter.encrypted_aes_key);
+    if (!encryptionResult.success) {
+      return reply.status(500).send({ error: 'Failed to encrypt patient encounter name: ' + encryptionResult.error });
+    }
+
+    const encounterUpdate = {
+      encrypted_name: encounterObj.encrypted_name,
+      iv: encounterObj.iv,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Step 4: Prepare transcript update (encrypt transcript_text)
+    const transcript = { transcript_text };
+    const transcriptEncryptionResult = encryptionUtils.encryptField(transcript, 'transcript_text', patientEncounter.encrypted_aes_key);
+    if (!transcriptEncryptionResult.success) {
+      return reply.status(500).send({ error: 'Failed to encrypt transcript: ' + transcriptEncryptionResult.error });
+    }
+
+    // Check if transcript exists
+    const { data: existingTranscript, error: fetchTranscriptError } = await supabase
+      .from(transcriptTable)
+      .select('id')
+      .eq('recording_id', recording.id)
+      .single();
+
+    // PGRST116 = no rows found (ok)
+    if (fetchTranscriptError && fetchTranscriptError.code !== 'PGRST116') {
+      return reply.status(500).send({ error: 'Failed to query transcript: ' + fetchTranscriptError.message });
+    }
+
+    const transcriptUpdate = {
+      encrypted_transcript_text: transcript.encrypted_transcript_text,
+      iv: transcript.iv,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Step 5: Execute updates with rollback on failure
+    try {
+      // Update patient encounter
+      const { error: updateEncounterError } = await supabase
+        .from(patientEncounterTable)
+        .update(encounterUpdate)
+        .eq('id', patientEncounterId);
+
+      if (updateEncounterError) {
+        throw new Error('Failed to update patient encounter: ' + updateEncounterError.message);
+      }
+
+      // Update or create transcript
+      try {
+        if (existingTranscript) {
+          const { error: updateTranscriptError } = await supabase
+            .from(transcriptTable)
+            .update(transcriptUpdate)
+            .eq('id', existingTranscript.id);
+
+          if (updateTranscriptError) {
+            throw new Error('Failed to update transcript: ' + updateTranscriptError.message);
+          }
+        } else {
+          const { error: createTranscriptError } = await supabase
+            .from(transcriptTable)
+            .insert({
+              recording_id: recording.id,
+              user_id: user.id,
+              ...transcriptUpdate,
+            });
+
+          if (createTranscriptError) {
+            throw new Error('Failed to create transcript: ' + createTranscriptError.message);
+          }
+        }
+      } catch (transcriptError) {
+        // ROLLBACK: Revert patient encounter update
+        console.error('Transcript operation failed, rolling back patient encounter update:', transcriptError);
+        const rollbackData = {
+          encrypted_name: originalEncryptedName,
+          iv: originalIv,
+        };
+        await supabase
+          .from(patientEncounterTable)
+          .update(rollbackData)
+          .eq('id', patientEncounterId);
+        throw transcriptError;
+      }
+
+      // Step 6: Fetch and return updated data
+      const { data: updatedEncounter, error: fetchEncounterError } = await supabase
+        .from(patientEncounterTable)
+        .select('*')
+        .eq('id', patientEncounterId)
+        .single();
+
+      if (fetchEncounterError) {
+        throw new Error('Failed to fetch updated encounter: ' + fetchEncounterError.message);
+      }
+
+      let updatedTranscript = null;
+      const { data: fetchedTranscript, error: fetchTranscriptError2 } = await supabase
+        .from(transcriptTable)
+        .select('*')
+        .eq('recording_id', recording.id)
+        .single();
+
+      if (fetchTranscriptError2 && fetchTranscriptError2.code !== 'PGRST116') {
+        throw new Error('Failed to fetch updated transcript: ' + fetchTranscriptError2.message);
+      }
+      updatedTranscript = fetchedTranscript;
+
+      return reply.status(200).send({
+        success: true,
+        data: {
+          patientEncounter: updatedEncounter,
+          transcript: updatedTranscript,
+        },
+      });
+    } catch (transactionError) {
+      console.error('Transaction error during compound update:', transactionError);
+      return reply.status(500).send({ error: transactionError.message });
+    }
+  } catch (error) {
+    console.error('Error updating patient encounter with transcript:', error);
+    return reply.status(500).send({ error: error.message });
   }
 }

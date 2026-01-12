@@ -545,12 +545,12 @@ export async function transcribe_expand_mask({
     // attempt to normalize to JSON body if available
     if (typeof maskResult.json === 'function') {
       const body = await maskResult.json();
-      return { cloudRunData, maskResult: body };
+      return { cloudRunData, dotPhrasesData, expandedTranscript, maskResult: body };
     }
   }
 
   // Return structured result for callers
-  return { cloudRunData, maskResult };
+  return { cloudRunData, dotPhrasesData, expandedTranscript, maskResult };
 }
 
 /**

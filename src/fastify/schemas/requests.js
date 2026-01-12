@@ -46,6 +46,24 @@ export const patientEncounterUpdateRequestSchema = z.object({
 });
 
 /**
+ * PATCH request for transcript-only updates via patient encounter endpoint
+ * Endpoint: PATCH /api/patient-encounters/:id/transcript
+ */
+export const patientEncounterTranscriptUpdateRequestSchema = z.object({
+  transcript_text: z.string().min(1, 'Transcript text is required'),
+});
+
+/**
+ * PATCH request for compound updates (name + transcript)
+ * Endpoint: PATCH /api/patient-encounters/:id/update-with-transcript
+ * Both fields are required
+ */
+export const patientEncounterWithTranscriptUpdateRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  transcript_text: z.string().min(1, 'Transcript text is required'),
+});
+
+/**
  * Schema for the transformed data before database operations
  * This is what gets validated before saving to DB
  */
