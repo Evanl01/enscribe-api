@@ -42,6 +42,10 @@ jobs:
     name: Deploy to EC2 via EC2 Instance Connect
     if: success()
     
+    permissions:
+      contents: read
+      id-token: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
