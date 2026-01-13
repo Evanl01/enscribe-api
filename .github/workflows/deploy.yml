@@ -59,10 +59,9 @@ jobs:
       - name: Deploy via Systems Manager
         env:
           INSTANCE_ID: i-086b6a2ef671e8c63
-          FASTIFY_PORT: ${{ secrets.FASTIFY_PORT }}
         run: |
           # Create deployment script with all secrets
-          DEPLOY_SCRIPT=$(cat <<'DEPLOYEOF'
+          cat > /tmp/deploy.sh << 'DEPLOYEOF'
           set -e
           echo "Starting deployment..."
           cd /opt/enscribe-api
@@ -127,14 +126,16 @@ jobs:
           echo "Deployment completed successfully!"
           pm2 status
           DEPLOYEOF
-          )
+          
+          # Base64 encode the script to preserve all special characters
+          SCRIPT_B64=$(base64 -w 0 < /tmp/deploy.sh)
           
           # Send command to EC2 via SSM
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
             --region us-east-1 \
-            --parameters "commands=['$DEPLOY_SCRIPT']" \
+            --parameters 'commands=["echo \"'"$SCRIPT_B64"'\" | base64 -d | bash"]' \
             --query 'Command.CommandId' \
             --output text)
           
