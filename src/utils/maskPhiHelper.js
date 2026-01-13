@@ -159,14 +159,21 @@ function splitIntoChunks(text, maxChars) {
  * @returns {Promise<Object>} - { masked_transcript, phi_entities, skipped_entities, mask_threshold }
  */
 async function processSingleChunk(transcript, mask_threshold = 0.15) {
-  // AWS Comprehend Medical client
-  const client = new ComprehendMedicalClient({
+  // AWS Comprehend Medical client configuration
+  const clientConfig = {
     region: process.env.AWS_REGION || "us-east-1",
-    credentials: {
+  };
+
+  // Only set explicit credentials if they exist (for local development)
+  // On EC2, the SDK will automatically use IAM role from default credential chain
+  if (process.env.AWS_COMPREHEND_ACCESS_KEY_ID && process.env.AWS_COMPREHEND_SECRET_ACCESS_KEY) {
+    clientConfig.credentials = {
       accessKeyId: process.env.AWS_COMPREHEND_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_COMPREHEND_SECRET_ACCESS_KEY,
-    },
-  });
+    };
+  }
+
+  const client = new ComprehendMedicalClient(clientConfig);
 
   // Call detect PHI
   const command = new DetectPHICommand({ Text: transcript });

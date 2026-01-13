@@ -99,6 +99,9 @@ SUPABASE_SERVICE_ROLE_KEY=
 GOOGLE_CLOUD_PROJECT_ID=
 GOOGLE_CLOUD_PRIVATE_KEY=
 GOOGLE_CLOUD_CLIENT_EMAIL=
+# AWS Comprehend Medical Configuration
+# Required for LOCAL development only to test maskPhiHelper
+# Not needed on EC2 - the EC2 instance IAM role provides access automatically
 AWS_COMPREHEND_ACCESS_KEY_ID=
 AWS_COMPREHEND_SECRET_ACCESS_KEY=
 OPENAI_API_KEY=
