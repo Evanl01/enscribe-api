@@ -72,6 +72,9 @@ jobs:
             --ssh-public-key file:///tmp/ec2-deploy-key.pub \
             --region us-east-1
           
+          # Wait for EC2 Instance Connect to write key to authorized_keys
+          sleep 5
+          
           # SSH using temporary key
           ssh -i /tmp/ec2-deploy-key \
             -o StrictHostKeyChecking=no \
