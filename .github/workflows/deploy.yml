@@ -39,23 +39,40 @@ jobs:
   deploy:
     needs: build-and-test
     runs-on: ubuntu-latest
-    name: Deploy to EC2 via SSH
+    name: Deploy to EC2 via EC2 Instance Connect
     if: success()
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_DEPLOY_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.EC2_DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::637423355461:role/github-actions-ec2-deploy-oidc
+          aws-region: us-east-1
 
-      - name: Deploy via SSH
+      - name: Deploy via EC2 Instance Connect
+        env:
+          INSTANCE_ID: i-086b6a2ef671e8c63
+          OS_USER: ec2-user
+          EC2_HOST: ${{ secrets.EC2_DEPLOY_HOST }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.EC2_DEPLOY_HOST }} << 'DEPLOY_SCRIPT'
+          # Generate temporary SSH key pair
+          ssh-keygen -t rsa -N "" -f /tmp/ec2-deploy-key
+          
+          # Push public key to EC2 (valid 60 seconds)
+          aws ec2-instance-connect send-ssh-public-key \
+            --instance-id $INSTANCE_ID \
+            --instance-os-user $OS_USER \
+            --ssh-public-key file:///tmp/ec2-deploy-key.pub \
+            --region us-east-1
+          
+          # SSH using temporary key
+          ssh -i /tmp/ec2-deploy-key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            ${OS_USER}@${EC2_HOST} << 'DEPLOY_SCRIPT'
           set -e
           
           echo "Starting deployment..."
