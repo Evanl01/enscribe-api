@@ -32,9 +32,6 @@ jobs:
         run: npm run lint --if-present
         continue-on-error: true  # Don't fail deployment if lint fails
 
-      - name: Build Next.js
-        run: npm run build
-
       - name: Run tests
         run: npm test
         continue-on-error: true  # Tests are informational
@@ -125,10 +122,6 @@ jobs:
             # CPU Threshold for GCP VM
             CPU_THRESHOLD=${{ secrets.CPU_THRESHOLD }}
             ENVEOF
-            
-            # Build Next.js
-            echo "Building Next.js..."
-            npm run build
             
             # Stop existing services
             echo "Stopping existing services..."
