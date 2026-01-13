@@ -59,7 +59,7 @@ jobs:
           set -e
           
           echo "Starting deployment..."
-          cd ~/enscribe-api
+          cd /opt/enscribe-api
           
           # Pull latest code
           echo "Pulling latest code from main branch..."
