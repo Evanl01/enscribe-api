@@ -79,8 +79,8 @@ async function testTranscribeRecording(accessToken, testAccount, testData) {
     
     // Use user's JWT token for authenticated access (respects RLS policies)
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
       {
         auth: { persistSession: false },
         global: { 
@@ -91,7 +91,7 @@ async function testTranscribeRecording(accessToken, testAccount, testData) {
       }
     );
     
-    console.log(`  Supabase URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`);
+    console.log(`  Supabase URL: ${process.env.SUPABASE_URL}`);
     console.log(`  Bucket: ${RECORDINGS_BUCKET}`);
     console.log(`  Recording path: ${recording.path}`);
     

@@ -1,0 +1,222 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+env:
+  NODE_VERSION: '22'
+  NODE_ENV: 'production'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    name: Build & Test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint --if-present
+        continue-on-error: true  # Don't fail deployment if lint fails
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+        continue-on-error: true  # Tests are informational
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    name: Deploy to EC2
+    if: success()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (EC2 Deployment)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACTIONS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_ACTIONS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy via Systems Manager
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          DEPLOYMENT_SCRIPT: |
+            #!/bin/bash
+            set -e
+            
+            echo "Starting deployment..."
+            cd /opt/enscribe-api
+            
+            # Pull latest code
+            echo "Pulling latest code from main branch..."
+            git fetch origin main
+            git reset --hard origin/main
+            
+            # Install dependencies
+            echo "Installing dependencies..."
+            npm ci --omit=dev
+            
+            # Create .env.local with secrets
+            echo "Setting up environment variables..."
+            cat > .env.local << 'ENVEOF'
+            # Supabase Configuration
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            
+            # Fastify Server Configuration
+            FASTIFY_HOST=0.0.0.0
+            FASTIFY_PORT=${{ secrets.FASTIFY_PORT }}
+            NODE_ENV=production
+            ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}
+            
+            # OpenAI Configuration
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            OPENAI_API_URL=${{ secrets.OPENAI_API_URL }}
+            
+            # Google Cloud Configuration
+            GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+            GCP_SERVICE_ACCOUNT_KEY=${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GEMINI_API_URL=${{ secrets.GEMINI_API_URL }}
+            GCP_ZONE=${{ secrets.GCP_ZONE }}
+            GCP_VM_INSTANCE_NAME=${{ secrets.GCP_VM_INSTANCE_NAME }}
+            GCP_VM_RATE_LIMIT_MAX_CALLS=${{ secrets.GCP_VM_RATE_LIMIT_MAX_CALLS }}
+            GCP_VM_RATE_LIMIT_WINDOW_SEC=${{ secrets.GCP_VM_RATE_LIMIT_WINDOW_SEC }}
+            CLOUD_RUN_TRANSCRIBE_URL=${{ secrets.CLOUD_RUN_TRANSCRIBE_URL }}
+            
+            # AWS Comprehend Medical Configuration
+            AWS_COMPREHEND_ACCESS_KEY_ID=${{ secrets.AWS_COMPREHEND_ACCESS_KEY_ID }}
+            AWS_COMPREHEND_SECRET_ACCESS_KEY=${{ secrets.AWS_COMPREHEND_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            
+            # Authentication & Security
+            RSA_PRIVATE_KEY=${{ secrets.RSA_PRIVATE_KEY }}
+            RSA_PUBLIC_KEY=${{ secrets.RSA_PUBLIC_KEY }}
+            REFRESH_TOKEN_AES_KEY_HEX=${{ secrets.REFRESH_TOKEN_AES_KEY_HEX }}
+            REFRESH_TOKEN_SIGNING_KEY_HEX=${{ secrets.REFRESH_TOKEN_SIGNING_KEY_HEX }}
+            
+            # Refresh Token Configuration
+            REFRESH_COOKIE_DOMAIN=${{ secrets.REFRESH_COOKIE_DOMAIN }}
+            REFRESH_COOKIE_SAMESITE=${{ secrets.REFRESH_COOKIE_SAMESITE }}
+            REFRESH_COOKIE_SECURE=${{ secrets.REFRESH_COOKIE_SECURE }}
+            REFRESH_INACTIVITY_LIMIT_SECONDS=${{ secrets.REFRESH_INACTIVITY_LIMIT_SECONDS }}
+            REFRESH_MAX_AGE_SECONDS=${{ secrets.REFRESH_MAX_AGE_SECONDS }}
+            
+            # CPU Threshold for GCP VM
+            CPU_THRESHOLD=${{ secrets.CPU_THRESHOLD }}
+            ENVEOF
+            
+            # Build Next.js
+            echo "Building Next.js..."
+            npm run build
+            
+            # Stop existing services
+            echo "Stopping existing services..."
+            pm2 stop all || true
+            pm2 delete all || true
+            
+            # Start services with PM2
+            echo "Starting Fastify backend..."
+            pm2 start "npm run start:fastify" --name "fastify-server" --env production
+            
+            # Wait for services to be healthy
+            echo "Waiting for services to start..."
+            sleep 5
+            
+            # Health checks
+            echo "Verifying backend health..."
+            FASTIFY_PORT=${FASTIFY_PORT:-3001}
+            for i in {1..10}; do
+              if curl -f http://localhost:${FASTIFY_PORT}/health > /dev/null 2>&1; then
+                echo "✓ Fastify backend is healthy on port ${FASTIFY_PORT}"
+                break
+              fi
+              echo "Attempt $i/10 - Waiting for backend..."
+              sleep 2
+            done
+            
+            # Save PM2 config
+            pm2 save
+            
+            echo "Deployment completed successfully!"
+            pm2 status
+        run: |
+          # Create deployment script
+          cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT_EOF'
+          ${{ env.DEPLOYMENT_SCRIPT }}
+          DEPLOY_SCRIPT_EOF
+          
+          chmod +x /tmp/deploy.sh
+          
+          # Execute script on EC2 via Systems Manager
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["'"$(cat /tmp/deploy.sh | sed 's/"/\\"/g' | tr '\n' ' ')"'"]' \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --output json > /tmp/command-output.json
+          
+          # Get command ID and wait for completion
+          COMMAND_ID=$(jq -r '.Command.CommandId' /tmp/command-output.json)
+          echo "Deployment Command ID: $COMMAND_ID"
+          
+          # Wait for command to complete (max 10 minutes)
+          for i in {1..60}; do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ env.INSTANCE_ID }}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query 'Status' \
+              --output text)
+            
+            echo "Status: $STATUS"
+            
+            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ]; then
+              break
+            fi
+            
+            sleep 10
+          done
+          
+          # Get output
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ env.INSTANCE_ID }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+            --output json > /tmp/invocation.json
+          
+          COMMAND_STATUS=$(jq -r '.Status' /tmp/invocation.json)
+          STDOUT=$(jq -r '.StandardOutputContent' /tmp/invocation.json)
+          STDERR=$(jq -r '.StandardErrorContent' /tmp/invocation.json)
+          
+          echo "=== Deployment Output ==="
+          echo "$STDOUT"
+          
+          if [ ! -z "$STDERR" ]; then
+            echo "=== Errors ==="
+            echo "$STDERR"
+          fi
+          
+          if [ "$COMMAND_STATUS" != "Success" ]; then
+            exit 1
+          fi

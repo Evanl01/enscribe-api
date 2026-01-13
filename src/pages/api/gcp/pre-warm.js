@@ -14,7 +14,7 @@ async function getVMStatus(compute) {
   const res = await compute.instances.get({
     project: process.env.GCP_PROJECT_ID,
     zone: process.env.GCP_ZONE,
-    instance: process.env.INSTANCE_NAME,
+    instance: process.env.GCP_VM_INSTANCE_NAME,
   });
   return res.data.status; // e.g., RUNNING, TERMINATED, PROVISIONING
 }
@@ -23,7 +23,7 @@ async function startVM(compute) {
   return await compute.instances.start({
     project: process.env.GCP_PROJECT_ID,
     zone: process.env.GCP_ZONE,
-    instance: process.env.INSTANCE_NAME,
+    instance: process.env.GCP_VM_INSTANCE_NAME,
   });
 }
 

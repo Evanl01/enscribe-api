@@ -76,7 +76,7 @@ export default async function handler(req, res) {
   if (wrapperFromBody) {
     dbg('token came from request body, treating as raw refresh token from mobile app');
     try {
-      const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
+      const baseUrl = `${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
       const url = `${baseUrl}?grant_type=refresh_token`;
       const jsonBody = JSON.stringify({ refresh_token: wrapper });
       dbg('attempting supabase exchange for raw refresh token', { url });
@@ -247,7 +247,7 @@ export default async function handler(req, res) {
   try {
     // Use JSON body with grant_type in query param to match caller's tested curl variant.
     // Example: POST /auth/v1/token?grant_type=refresh_token with { refresh_token }
-    const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
+    const baseUrl = `${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
     const url = `${baseUrl}?grant_type=refresh_token`;
     const jsonBody = JSON.stringify({ refresh_token: rawStoredRefresh });
     dbg('refresh body preview (json)', String(jsonBody).slice(0, 300));

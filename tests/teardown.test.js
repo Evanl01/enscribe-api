@@ -113,7 +113,7 @@ async function teardownTestData() {
     // Step 2: Create Supabase client
     console.log('Step 2: Initializing Supabase client...');
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_URL,
       accessToken
     );
     console.log('✓ Supabase client ready\n');
