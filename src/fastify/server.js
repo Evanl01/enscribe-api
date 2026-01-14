@@ -9,6 +9,8 @@ dotenv.config({ path: envPath });
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import pino from 'pino';
+import pinoHttp from 'pino-http';
 import authenticationPlugin from './plugins/authentication.js';
 import { ALLOWED_ORIGINS_LIST } from './middleware/cors.js';
 import authRoutes from './routes/auth.js';
@@ -32,18 +34,55 @@ async function createFastifyApp(options = {}) {
     environment = process.env.NODE_ENV || 'development',
   } = options;
 
-  // Create Fastify instance with logging
-  const fastify = Fastify({
-    logger: environment === 'production' ? true : {
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'SYS:standard',
-          ignore: 'pid,hostname',
-        },
+  // Configure Pino logger for CloudWatch
+  const pinoLogger = pino({
+    level: environment === 'production' ? 'info' : 'debug',
+    transport: environment === 'development' ? {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
       },
-    },
+    } : undefined,
+  });
+
+  // Create Fastify instance with Pino logger
+  const fastify = Fastify({
+    logger: pinoLogger,
+  });
+
+  // Add request/response logging middleware (skip health checks)
+  fastify.register(async (fastifyInstance) => {
+    fastifyInstance.addHook('onRequest', async (request, reply) => {
+      // Skip logging for health checks
+      if (request.url === '/' || request.url === '/health') {
+        return;
+      }
+
+      request.log.info({
+        event: 'request_received',
+        method: request.method,
+        url: request.url,
+        remoteAddress: request.ip,
+        userAgent: request.headers['user-agent'],
+      }, `[${request.method}] ${request.url}`);
+    });
+
+    fastifyInstance.addHook('onResponse', async (request, reply) => {
+      // Skip logging for health checks
+      if (request.url === '/' || request.url === '/health') {
+        return;
+      }
+
+      request.log.info({
+        event: 'request_completed',
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        responseTime: `${reply.getResponseTime().toFixed(2)}ms`,
+      }, `[${request.method}] ${request.url} → ${reply.statusCode}`);
+    });
   });
 
   // Register CORS plugin with production-ready allowed origins
