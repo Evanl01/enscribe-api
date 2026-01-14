@@ -18,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, '../.env.local');
 dotenv.config({ path: envPath });
 
-import { getTestAccount, hasTestAccounts } from './testConfig.js';
+import { getTestAccount, hasTestAccounts, getApiBaseUrl } from './testConfig.js';
 import { createClient } from '@supabase/supabase-js';
 
 const RECORDINGS_BUCKET = 'audio-files';
@@ -54,7 +54,7 @@ const DEFAULT_DOTPHRASES = [
  */
 async function createRecordingEntry(accessToken, recordingPath, encounterId) {
   try {
-    const response = await fetch('http://localhost:3001/api/recordings', {
+    const response = await fetch(`${getApiBaseUrl()}/api/recordings`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -195,7 +195,7 @@ async function setupTestRecordings(accessToken, supabase, userId) {
   const createdEncounters = [];
   
   try {
-    const fetchResponse = await fetch('http://localhost:3001/api/patient-encounters', {
+    const fetchResponse = await fetch(`${getApiBaseUrl()}/api/patient-encounters`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -214,7 +214,7 @@ async function setupTestRecordings(accessToken, supabase, userId) {
           console.log(`  ⏭️  Encounter "${name}" exists (ID: ${existing.id})`);
         } else {
           try {
-            const createResponse = await fetch('http://localhost:3001/api/patient-encounters', {
+            const createResponse = await fetch(`${getApiBaseUrl()}/api/patient-encounters`, {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -288,7 +288,7 @@ async function setupTestRecordings(accessToken, supabase, userId) {
   // Fetch existing recordings to avoid duplicates
   let existingRecordings = [];
   try {
-    const recordingsResponse = await fetch('http://localhost:3001/api/recordings', {
+    const recordingsResponse = await fetch(`${getApiBaseUrl()}/api/recordings`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -348,7 +348,7 @@ async function setupTestRecordings(accessToken, supabase, userId) {
     }
     
     try {
-      const response = await fetch('http://localhost:3001/api/recordings', {
+      const response = await fetch(`${getApiBaseUrl()}/api/recordings`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -449,7 +449,7 @@ async function setupPatientEncounters(accessToken) {
   
   try {
     // Fetch existing encounters
-    const response = await fetch('http://localhost:3001/api/patient-encounters', {
+    const response = await fetch(`${getApiBaseUrl()}/api/patient-encounters`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -523,7 +523,7 @@ async function setupDotPhrases(accessToken) {
   // Fetch existing dotPhrases for the user
   let existingDotPhrases = [];
   try {
-    const getResponse = await fetch('http://localhost:3001/api/dot-phrases', {
+    const getResponse = await fetch(`${getApiBaseUrl()}/api/dot-phrases`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -549,7 +549,7 @@ async function setupDotPhrases(accessToken) {
     // If not in expected list or expansion doesn't match, delete it
     if (!expectedExpansion || expectedExpansion !== existing.expansion) {
       try {
-        const deleteResponse = await fetch(`http://localhost:3001/api/dot-phrases/${existing.id}`, {
+        const deleteResponse = await fetch(`${getApiBaseUrl()}/api/dot-phrases/${existing.id}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -580,7 +580,7 @@ async function setupDotPhrases(accessToken) {
     } else {
       // Create new
       try {
-        const response = await fetch('http://localhost:3001/api/dot-phrases', {
+        const response = await fetch(`${getApiBaseUrl()}/api/dot-phrases`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -635,7 +635,7 @@ async function setupSoapNotes(accessToken, encounters) {
     
     // Check existing notes for this encounter via complete encounter endpoint
     try {
-      const getResponse = await fetch(`http://localhost:3001/api/patient-encounters/complete/${encounter.id}`, {
+      const getResponse = await fetch(`${getApiBaseUrl()}/api/patient-encounters/complete/${encounter.id}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
@@ -669,7 +669,7 @@ async function setupSoapNotes(accessToken, encounters) {
       for (let i = 0; i < notesToCreate; i++) {
         const noteNum = startIndex + i;
         try {
-          const response = await fetch('http://localhost:3001/api/soap-notes', {
+          const response = await fetch(`${getApiBaseUrl()}/api/soap-notes`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -716,7 +716,7 @@ async function setupSoapNotes(accessToken, encounters) {
   
   // Test 1: Get all with DESC order (should be newest first)
   try {
-    const response = await fetch('http://localhost:3001/api/soap-notes?limit=100&offset=0&sortBy=created_at&order=desc', {
+    const response = await fetch(`${getApiBaseUrl()}/api/soap-notes?limit=100&offset=0&sortBy=created_at&order=desc`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -739,7 +739,7 @@ async function setupSoapNotes(accessToken, encounters) {
 
   // Test 2: Pagination with limit=2, offset=0
   try {
-    const response = await fetch('http://localhost:3001/api/soap-notes?limit=2&offset=0&sortBy=created_at&order=desc', {
+    const response = await fetch(`${getApiBaseUrl()}/api/soap-notes?limit=2&offset=0&sortBy=created_at&order=desc`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -762,7 +762,7 @@ async function setupSoapNotes(accessToken, encounters) {
 
   // Test 3: Pagination with limit=2, offset=1
   try {
-    const response = await fetch('http://localhost:3001/api/soap-notes?limit=2&offset=1&sortBy=created_at&order=desc', {
+    const response = await fetch(`${getApiBaseUrl()}/api/soap-notes?limit=2&offset=1&sortBy=created_at&order=desc`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -802,7 +802,13 @@ async function setupTranscripts(accessToken, recordings) {
   const createdTranscripts = [];
   
   // Only process attached recordings (not null IDs)
-  const attachedRecordings = recordings.filter(r => r.attached && r.id !== null);
+  const attachedRecordings = recordings
+    .filter(r => r.attached && r.id !== null)
+    .sort((a, b) => {
+      // Sort by recording ID for consistent ordering
+      if (!a.id || !b.id) return 0;
+      return String(a.id).localeCompare(String(b.id));
+    });
   
   if (attachedRecordings.length === 0) {
     console.warn(`  ⚠️  No attached recordings found.\n`);
@@ -814,7 +820,7 @@ async function setupTranscripts(accessToken, recordings) {
   // Fetch all transcripts once (API doesn't support filtering)
   let allTranscripts = [];
   try {
-    const allTranscriptsResponse = await fetch('http://localhost:3001/api/transcripts', {
+    const allTranscriptsResponse = await fetch(`${getApiBaseUrl()}/api/transcripts`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -829,25 +835,29 @@ async function setupTranscripts(accessToken, recordings) {
     console.warn(`  ⚠️  Error fetching all transcripts: ${error.message}`);
   }
   
-  for (const recording of attachedRecordings) {
+  for (let index = 0; index < attachedRecordings.length; index++) {
+    const recording = attachedRecordings[index];
+    
     try {
       // Filter transcripts for this specific recording (client-side filtering)
       const existingTranscripts = allTranscripts.filter(t => t.recording_id === recording.id);
       const existingTranscript = existingTranscripts.length > 0 ? existingTranscripts[0] : null;
       
-      if (existingTranscript) {
-        console.log(`  ⏭️  Transcript already exists for recording "${recording.filename}" (ID: ${existingTranscript.id})`);
-        createdTranscripts.push({
-          id: existingTranscript.id,
-          recordingId: recording.id,
-          filename: recording.filename,
-          encounterId: recording.encounterId,
-        });
-        continue;
-      }
-      
-      // Create new transcript with mock text
-      const mockTranscriptText = `This is a mock transcript for recording "${recording.filename}". 
+      // FIRST 2 RECORDINGS: Create transcripts
+      if (index < 2) {
+        if (existingTranscript) {
+          console.log(`  ⏭️  Transcript already exists for recording "${recording.filename}" (ID: ${existingTranscript.id})`);
+          createdTranscripts.push({
+            id: existingTranscript.id,
+            recordingId: recording.id,
+            filename: recording.filename,
+            encounterId: recording.encounterId,
+          });
+          continue;
+        }
+        
+        // Create new transcript with mock text
+        const mockTranscriptText = `This is a mock transcript for recording "${recording.filename}". 
 Doctor: Good morning, how are you feeling today?
 Patient: I'm feeling much better, thank you for asking.
 Doctor: That's great to hear. Let me examine you and we'll discuss the next steps.
@@ -855,36 +865,59 @@ Patient: Sounds good.
 Doctor: Everything looks normal. Continue with your current medications and follow up in two weeks.
 Patient: Thank you, doctor. I appreciate your time.`;
 
-      const createResponse = await fetch('http://localhost:3001/api/transcripts', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recording_id: recording.id,
-          transcript_text: mockTranscriptText,
-        }),
-      });
-      
-      if (createResponse.ok) {
-        const created = await createResponse.json();
-        const transcriptId = created.id || created.data?.id;
-        
-        createdTranscripts.push({
-          id: transcriptId,
-          recordingId: recording.id,
-          filename: recording.filename,
-          encounterId: recording.encounterId,
+        const createResponse = await fetch(`${getApiBaseUrl()}/api/transcripts`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recording_id: recording.id,
+            transcript_text: mockTranscriptText,
+          }),
         });
         
-        console.log(`  ✓ Created transcript for "${recording.filename}" (ID: ${transcriptId})`);
+        if (createResponse.ok) {
+          const created = await createResponse.json();
+          const transcriptId = created.id || created.data?.id;
+          
+          createdTranscripts.push({
+            id: transcriptId,
+            recordingId: recording.id,
+            filename: recording.filename,
+            encounterId: recording.encounterId,
+          });
+          
+          console.log(`  ✓ Created transcript for "${recording.filename}" (ID: ${transcriptId})`);
+        } else {
+          const error = await createResponse.json();
+          console.warn(`  ⚠️  Failed to create transcript for "${recording.filename}": ${error.error || createResponse.status}`);
+        }
       } else {
-        const error = await createResponse.json();
-        console.warn(`  ⚠️  Failed to create transcript for "${recording.filename}": ${error.error || createResponse.status}`);
+        // 3RD+ RECORDINGS: Delete transcripts if they exist
+        if (existingTranscript) {
+          try {
+            const deleteResponse = await fetch(`${getApiBaseUrl()}/api/transcripts/${existingTranscript.id}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+              },
+            });
+            
+            if (deleteResponse.ok) {
+              console.log(`  🗑️  Deleted transcript for "${recording.filename}" (ID: ${existingTranscript.id})`);
+            } else {
+              console.warn(`  ⚠️  Failed to delete transcript for "${recording.filename}": ${deleteResponse.status}`);
+            }
+          } catch (deleteError) {
+            console.warn(`  ⚠️  Error deleting transcript for "${recording.filename}": ${deleteError.message}`);
+          }
+        } else {
+          console.log(`  ℹ️  No transcript to delete for recording "${recording.filename}" (expected)`);
+        }
       }
     } catch (error) {
-      console.warn(`  ⚠️  Error creating transcript for "${recording.filename}": ${error.message}`);
+      console.warn(`  ⚠️  Error processing recording "${recording.filename}": ${error.message}`);
     }
   }
   
@@ -902,7 +935,7 @@ async function setupTestData() {
 
   // Check if server is running
   try {
-    const response = await fetch('http://localhost:3001/health');
+    const response = await fetch(`${getApiBaseUrl()}/health`);
     if (!response.ok) throw new Error('Server not responding');
     console.log('✅ Server health check passed\n');
   } catch (error) {
@@ -928,7 +961,7 @@ async function setupTestData() {
   try {
     // Step 1: Sign in to get access token
     console.log('Step 1: Authenticating...');
-    const signInResponse = await fetch('http://localhost:3001/api/auth', {
+    const signInResponse = await fetch(`${getApiBaseUrl()}/api/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -980,7 +1013,7 @@ async function setupTestData() {
     }
 
     // Get all encounters for validation
-    const allEncounters = await fetch('http://localhost:3001/api/patient-encounters', {
+    const allEncounters = await fetch(`${getApiBaseUrl()}/api/patient-encounters`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',

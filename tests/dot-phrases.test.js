@@ -14,7 +14,7 @@ const envPath = path.resolve(__dirname, '../.env.local');
 dotenv.config({ path: envPath });
 
 import { TestRunner } from './testUtils.js';
-import { getTestAccount, hasTestAccounts } from './testConfig.js';
+import { getTestAccount, hasTestAccounts, getApiBaseUrl } from './testConfig.js';
 
 const runner = new TestRunner('Dot Phrases API Tests');
 
@@ -28,7 +28,8 @@ let cachedDotPhraseId = null;
  */
 async function runDotPhrasesTests() {
   console.log('Starting Dot Phrases API tests...');
-  console.log('Server: http://localhost:3001');
+  console.log(`Server: ${getApiBaseUrl()}`);
+  console.log('Note: These tests require valid JWT authentication\n');
   console.log('Note: These tests require valid JWT authentication\n');
 
   // Get valid access token from test account

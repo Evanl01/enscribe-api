@@ -18,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, '../.env.local');
 dotenv.config({ path: envPath });
 
-import { getTestAccount, hasTestAccounts } from './testConfig.js';
+import { getTestAccount, hasTestAccounts, getApiBaseUrl } from './testConfig.js';
 import { createClient } from '@supabase/supabase-js';
 
 const RECORDINGS_BUCKET = 'audio-files';
@@ -68,7 +68,7 @@ async function teardownTestData() {
 
   // Check if server is running
   try {
-    const response = await fetch('http://localhost:3001/health');
+    const response = await fetch(`${getApiBaseUrl()}/health`);
     if (!response.ok) throw new Error('Server not responding');
     console.log('✅ Server health check passed\n');
   } catch (error) {
@@ -92,7 +92,7 @@ async function teardownTestData() {
   try {
     // Step 1: Sign in to get access token
     console.log('Step 1: Authenticating...');
-    const signInResponse = await fetch('http://localhost:3001/api/auth', {
+    const signInResponse = await fetch(`${getApiBaseUrl()}/api/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -122,7 +122,7 @@ async function teardownTestData() {
     console.log('Step 3: Deleting test encounters...');
     let deletedCount = 0;
     for (const encounter of testData.encounters) {
-      const response = await fetch(`http://localhost:3001/api/patient-encounters/${encounter.id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/patient-encounters/${encounter.id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${accessToken}`,

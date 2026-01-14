@@ -153,7 +153,7 @@ async function cleanupTestEncounters(accessToken) {
  */
 async function runPatientEncounterTests() {
   console.log('Starting Patient Encounters API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Track suite-level count for cleanup verification
   let suiteCountBefore = null;

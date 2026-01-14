@@ -21,7 +21,7 @@ const runner = new TestRunner('Authentication API Tests');
  */
 async function runAuthTests() {
   console.log('Starting Authentication API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Test 1: Sign-up with invalid email format (Supabase rejects invalid emails)
   await runner.test('Sign-up with email', {

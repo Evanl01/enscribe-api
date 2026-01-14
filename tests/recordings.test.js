@@ -88,7 +88,7 @@ async function runRecordingsTests() {
   testData = loadTestData();
 
   console.log('Starting Recordings API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
   console.log('Test Data Loaded:');
   console.log(`  Encounters: ${testData.encounters.length}`);
   console.log(`  Recordings: ${testData.recordings.length} (${testData.recordings.filter(r => r.attached).length} attached, ${testData.recordings.filter(r => !r.attached).length} unattached)\n`);
@@ -469,7 +469,7 @@ async function runRecordingsCrudTests() {
   testData = loadTestData();
 
   console.log('Starting Recordings CRUD tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Get valid access token from test account
   let accessToken = null;

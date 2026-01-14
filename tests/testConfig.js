@@ -52,6 +52,18 @@ export function hasTestAccounts() {
 }
 
 /**
+ * Get API base URL for tests
+ * Can be overridden with API_BASE_URL environment variable
+ * Default: http://localhost:3001 (local testing)
+ * Production: https://api.enscribe.sjpedgi.doctor
+ * 
+ * Usage: API_BASE_URL=https://api.enscribe.sjpedgi.doctor npm test
+ */
+export function getApiBaseUrl() {
+  return process.env.API_BASE_URL || 'http://localhost:3001';
+}
+
+/**
  * Log test account status (safe - only shows email prefix)
  */
 export function logTestAccountStatus() {

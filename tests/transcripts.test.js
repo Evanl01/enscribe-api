@@ -60,7 +60,7 @@ async function runTranscriptsTests() {
   const gracefullyHandledTests = [];
 
   console.log('Starting Transcripts API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
   console.log('Test Data Loaded:');
   console.log(`  Encounters: ${testData.encounters.length}`);
   console.log(`  Recordings: ${testData.recordings.length}\n`);
@@ -181,13 +181,21 @@ async function runTranscriptsTests() {
     });
   }
 
-  // Test 7: POST /transcripts with valid data (create)
-  // Note: This may fail if transcripts were already created by setup.test.js
-  // (duplicate key constraint on recording_id)
+  // Test 7: POST /transcripts with valid data (create for 3rd recording)
+  // Uses 3rd recording (index 2) which should not have a transcript from setup.test.js
   let createdTranscriptId = null;
-  if (accessToken && testData.recordings.length > 0) {
-    const validRecording = testData.recordings.find(r => r.id !== null);
-    if (validRecording) {
+  let test7Passed = false;
+  let test7Message = '';
+  
+  if (accessToken && testData.recordings.length >= 3) {
+    // Sort recordings by ID (matching setup.test.js ordering)
+    const recordingsSorted = testData.recordings
+      .filter(r => r.id !== null)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    
+    if (recordingsSorted.length >= 3) {
+      const thirdRecording = recordingsSorted[2]; // 3rd recording (0-indexed: position 2)
+      
       const result = await runner.test('POST /api/transcripts - create transcript', {
         method: 'POST',
         endpoint: '/api/transcripts',
@@ -196,49 +204,24 @@ async function runTranscriptsTests() {
         },
         body: {
           transcript_text: 'This is a test transcript for the recording.',
-          recording_id: validRecording.id,
+          recording_id: thirdRecording.id,
         },
         expectedStatus: 201,
       });
 
-      // Handle duplicate key error gracefully
-      if (!result.passed) {
-        if (result.body?.error?.includes('duplicate key') || 
-            result.body?.error?.includes('unique constraint')) {
-          gracefullyHandledCount++;
-          gracefullyHandledTests.push('Test 7 (POST/CREATE)');
-          
-          console.log('');
-          console.log('    ⚠️  GRACEFUL ERROR HANDLING TRIGGERED');
-          console.log(`    ℹ️  Transcript already exists (likely created by setup.test.js)`);
-          console.log(`    ℹ️  Attempting to fetch existing transcript for DELETE tests...`);
-          // Try to fetch existing transcripts and use one for DELETE tests
-          try {
-            const transcriptsFetch = await fetch('http://localhost:3001/api/transcripts', {
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-            });
-            if (transcriptsFetch.ok) {
-              const transcripts = await transcriptsFetch.json();
-              if (Array.isArray(transcripts) && transcripts.length > 0) {
-                // Use the first existing transcript for delete tests
-                createdTranscriptId = transcripts[0].id;
-                console.log(`    ✓ Found existing transcript ID: ${createdTranscriptId}`);
-                console.log(`    ✓ DELETE tests will use this transcript instead`);
-              }
-            }
-          } catch (e) {
-            console.log(`    ⚠️  Could not fetch existing transcripts: ${e.message}`);
-          }
-          console.log('');
-        }
-      } else if (result.passed && result.body?.id) {
+      if (result.passed && result.body?.id) {
         createdTranscriptId = result.body.id;
-        console.log(`    ✓ Created transcript with ID: ${createdTranscriptId}`);
+        test7Passed = true;
+        test7Message = `Created transcript with ID: ${createdTranscriptId}`;
+        console.log(`    ✓ ${test7Message}`);
+      } else {
+        test7Message = `Expected 201, got ${result.status || 'unknown'}`;
       }
+    } else {
+      test7Message = `Insufficient attached recordings: have ${recordingsSorted.length}, need 3`;
     }
+  } else {
+    test7Message = `Insufficient recordings in test data: have ${testData.recordings.length}, need 3`;
   }
 
   // Test 8: GET /transcripts/:id - get single transcript
@@ -290,68 +273,34 @@ async function runTranscriptsTests() {
   // If Test 7 fails or is skipped, PATCH tests will be skipped as well
 
   // Test 11: PATCH /transcripts/:id without auth
-  if (createdTranscriptId) {
-    await runner.test('PATCH /api/transcripts/:id without auth', {
-      method: 'PATCH',
-      endpoint: `/api/transcripts/${createdTranscriptId}`,
-      body: {
-        transcript_text: 'Updated transcript text',
-      },
-      expectedStatus: 401,
-      expectedFields: ['error'],
-    });
-  } else {
-    runner.results.push({
-      name: 'PATCH /api/transcripts/:id without auth',
-      passed: false,
-      endpoint: `/api/transcripts/[id]`,
-      method: 'PATCH',
-      status: null,
-      expectedStatus: 401,
-      body: {},
-      customMessage: '⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)',
-      testNumber: 11,
-      timestamp: new Date().toISOString(),
-    });
-    console.log('\n⚠️  Test 11: PATCH /api/transcripts/:id without auth');
-    console.log('    ⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)');
-  }
+  await runner.test('PATCH /api/transcripts/:id without auth', {
+    method: 'PATCH',
+    endpoint: '/api/transcripts/1',
+    body: {
+      transcript_text: 'Updated transcript text',
+    },
+    expectedStatus: 401,
+    expectedFields: ['error'],
+  });
 
   // Test 12: PATCH /transcripts/:id with invalid token
-  if (createdTranscriptId) {
-    await runner.test('PATCH /api/transcripts/:id with invalid token', {
-      method: 'PATCH',
-      endpoint: `/api/transcripts/${createdTranscriptId}`,
-      headers: {
-        Authorization: `Bearer ${MOCK_TOKEN}`,
-      },
-      body: {
-        transcript_text: 'Updated transcript text',
-      },
-      expectedStatus: 401,
-    });
-  } else {
-    runner.results.push({
-      name: 'PATCH /api/transcripts/:id with invalid token',
-      passed: false,
-      endpoint: `/api/transcripts/[id]`,
-      method: 'PATCH',
-      status: null,
-      expectedStatus: 401,
-      body: {},
-      customMessage: '⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)',
-      testNumber: 12,
-      timestamp: new Date().toISOString(),
-    });
-    console.log('\n⚠️  Test 12: PATCH /api/transcripts/:id with invalid token');
-    console.log('    ⚠️  SKIPPED: No transcript ID available from Test 7 (POST/CREATE)');
-  }
+  await runner.test('PATCH /api/transcripts/:id with invalid token', {
+    method: 'PATCH',
+    endpoint: '/api/transcripts/1',
+    headers: {
+      Authorization: `Bearer ${MOCK_TOKEN}`,
+    },
+    body: {
+      transcript_text: 'Updated transcript text',
+    },
+    expectedStatus: 401,
+  });
 
   // Test 13: PATCH /transcripts/:id - missing transcript_text
-  if (accessToken && createdTranscriptId) {
+  if (accessToken) {
     await runner.test('PATCH /api/transcripts/:id - missing transcript_text', {
       method: 'PATCH',
-      endpoint: `/api/transcripts/${createdTranscriptId}`,
+      endpoint: '/api/transcripts/1',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -359,26 +308,14 @@ async function runTranscriptsTests() {
       expectedStatus: 400,
       expectedFields: ['error'],
     });
-  } else {
-    runner.results.push({
-      name: 'PATCH /api/transcripts/:id - missing transcript_text',
-      passed: false,
-      endpoint: `/api/transcripts/[id]`,
-      method: 'PATCH',
-      status: null,
-      expectedStatus: 400,
-      body: {},
-      customMessage: '⚠️  SKIPPED: No transcript ID available or missing auth token',
-      testNumber: 13,
-      timestamp: new Date().toISOString(),
-    });
-    console.log('\n⚠️  Test 13: PATCH /api/transcripts/:id - missing transcript_text');
-    console.log('    ⚠️  SKIPPED: No transcript ID available or missing auth token');
   }
 
-  // Test 14: PATCH /transcripts/:id - update transcript
-  if (accessToken && createdTranscriptId) {
-    const updatedText = 'Updated transcript text with more details.';
+  // Test 14: PATCH /transcripts/:id - update transcript (DEPENDENT ON TEST 7)
+  let test14Passed = false;
+  let test14Message = '';
+  if (!createdTranscriptId) {
+    test14Message = '⚠️  SKIPPED: Test 7 failed, cannot test PATCH with real transcript';
+  } else {
     const result = await runner.test('PATCH /api/transcripts/:id - update transcript', {
       method: 'PATCH',
       endpoint: `/api/transcripts/${createdTranscriptId}`,
@@ -386,30 +323,34 @@ async function runTranscriptsTests() {
         Authorization: `Bearer ${accessToken}`,
       },
       body: {
-        transcript_text: updatedText,
+        transcript_text: 'Updated transcript text with more details.',
       },
       expectedStatus: 200,
     });
 
     if (result.passed && result.body?.id === createdTranscriptId) {
-      console.log(`    ✓ Updated transcript ${createdTranscriptId}`);
+      test14Passed = true;
+      test14Message = `Updated transcript ${createdTranscriptId}`;
+    } else {
+      test14Message = `Expected 200, got ${result.status || 'unknown'}`;
     }
-  } else {
-    runner.results.push({
-      name: 'PATCH /api/transcripts/:id - update transcript',
-      passed: false,
-      endpoint: `/api/transcripts/[id]`,
-      method: 'PATCH',
-      status: null,
-      expectedStatus: 200,
-      body: {},
-      customMessage: '⚠️  SKIPPED: No transcript ID available or missing auth token',
-      testNumber: 14,
-      timestamp: new Date().toISOString(),
-    });
-    console.log('\n⚠️  Test 14: PATCH /api/transcripts/:id - update transcript');
-    console.log('    ⚠️  SKIPPED: No transcript ID available or missing auth token');
   }
+
+  runner.results.push({
+    name: 'PATCH /api/transcripts/:id - update transcript',
+    passed: test14Passed,
+    endpoint: `/api/transcripts/${createdTranscriptId || '[id]'}`,
+    method: 'PATCH',
+    status: test14Passed ? 200 : null,
+    expectedStatus: 200,
+    customMessage: test14Message,
+    testNumber: 14,
+    timestamp: new Date().toISOString(),
+  });
+
+  const test14Result = test14Passed ? '✅' : (test14Message.includes('SKIPPED') ? '⚠️ ' : '❌');
+  console.log(`${test14Result} Test 14: PATCH /api/transcripts/:id - update transcript`);
+  console.log(`   ${test14Message}`);
 
   // Test 15: PATCH /transcripts/:id - not found
   if (accessToken) {
@@ -475,8 +416,12 @@ async function runTranscriptsTests() {
     });
   }
 
-  // Test 19: DELETE /transcripts/:id - delete transcript
-  if (accessToken && createdTranscriptId) {
+  // Test 19: DELETE /transcripts/:id - delete transcript (DEPENDENT ON TEST 7)
+  let test19Passed = false;
+  let test19Message = '';
+  if (!createdTranscriptId) {
+    test19Message = '⚠️  SKIPPED: Test 7 failed, cannot test DELETE with real transcript';
+  } else {
     const result = await runner.test('DELETE /api/transcripts/:id - delete transcript', {
       method: 'DELETE',
       endpoint: `/api/transcripts/${createdTranscriptId}`,
@@ -487,9 +432,28 @@ async function runTranscriptsTests() {
     });
 
     if (result.passed && result.body?.success) {
-      console.log(`    ✓ Deleted transcript ${createdTranscriptId}`);
+      test19Passed = true;
+      test19Message = `Deleted transcript ${createdTranscriptId}`;
+    } else {
+      test19Message = `Expected 200, got ${result.status || 'unknown'}`;
     }
   }
+
+  runner.results.push({
+    name: 'DELETE /api/transcripts/:id - delete transcript',
+    passed: test19Passed,
+    endpoint: `/api/transcripts/${createdTranscriptId || '[id]'}`,
+    method: 'DELETE',
+    status: test19Passed ? 200 : null,
+    expectedStatus: 200,
+    customMessage: test19Message,
+    testNumber: 19,
+    timestamp: new Date().toISOString(),
+  });
+
+  const test19Result = test19Passed ? '✅' : (test19Message.includes('SKIPPED') ? '⚠️ ' : '❌');
+  console.log(`${test19Result} Test 19: DELETE /api/transcripts/:id - delete transcript`);
+  console.log(`   ${test19Message}`);
 
   // Test 20: Verify deleted transcript is gone
   if (accessToken && createdTranscriptId) {

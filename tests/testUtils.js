@@ -4,6 +4,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { getApiBaseUrl } from './testConfig.js';
 
 /**
  * Make HTTP request to Fastify server
@@ -45,9 +46,10 @@ export async function makeRequest(method, url, options = {}) {
  * Test case executor
  */
 export class TestRunner {
-  constructor(testName, baseUrl = 'http://localhost:3001') {
+  constructor(testName, baseUrl = null) {
     this.testName = testName;
-    this.baseUrl = baseUrl;
+    // Use provided baseUrl, or fall back to getApiBaseUrl() for configurable endpoint support
+    this.baseUrl = baseUrl || getApiBaseUrl();
     this.results = [];
     this.startTime = new Date();
   }

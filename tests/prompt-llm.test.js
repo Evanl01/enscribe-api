@@ -267,7 +267,7 @@ async function runAllPromptLlmTests() {
   testData = loadTestData();
 
   console.log('Starting OpenAI Prompt-LLM API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Get real access token if test account is configured
   let accessToken = null;

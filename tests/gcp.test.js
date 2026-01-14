@@ -414,7 +414,7 @@ async function testErrorHandling(accessToken, testData) {
  */
 export async function runGcpTests() {
   console.log('Starting GCP Transcription Pipeline tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Load test data first
   console.log('Loading test data...');

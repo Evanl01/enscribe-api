@@ -415,7 +415,7 @@ async function testEdgeCases(accessToken) {
  */
 export async function runAwsTests() {
   console.log('Starting AWS PHI Masking API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Get real access token if test account is configured
   let accessToken = null;

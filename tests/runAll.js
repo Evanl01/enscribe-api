@@ -4,6 +4,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { getApiBaseUrl } from './testConfig.js';
 import { runAuthTests } from './auth.test.js';
 import { runDotPhrasesTests } from './dot-phrases.test.js';
 import { runPatientEncounterTests } from './patient-encounters.test.js';
@@ -27,12 +28,13 @@ async function runAllTests() {
 
   // Check if server is running
   try {
-    const response = await fetch('http://localhost:3001/health');
+    const response = await fetch(`${getApiBaseUrl()}/health`);
     if (!response.ok) throw new Error('Server not responding');
     console.log('✅ Server health check passed\n');
   } catch (error) {
-    console.error('❌ Server is not running. Start the server with:');
-    console.error('   npm run dev:fastify\n');
+    console.error(`❌ Server is not running at ${getApiBaseUrl()}`);
+    console.error('   Start the server with: npm run dev:fastify');
+    console.error('   Or test production: API_BASE_URL=https://api.enscribe.sjpedgi.doctor npm test\n');
     process.exit(1);
   }
 

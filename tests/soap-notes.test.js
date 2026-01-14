@@ -167,7 +167,7 @@ async function cleanupTestData(accessToken) {
  */
 async function runSoapNotesTests() {
   console.log('Starting SOAP Notes API tests...');
-  console.log('Server: http://localhost:3001\n');
+  console.log(`Server: ${runner.baseUrl}\n`);
 
   // Load test data first (created by setup)
   testData = loadTestData();
