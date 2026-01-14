@@ -63,16 +63,24 @@ jobs:
           # Create deployment script with all secrets
           cat > /tmp/deploy.sh << 'DEPLOYEOF'
           set -e
-          echo "Starting deployment..."
+          DEPLOY_START=$(date +%s)
+          echo "Starting deployment at $(date)"
           cd /opt/enscribe-api
           
+          PULL_START=$(date +%s)
           echo "Pulling latest code from main branch..."
           git fetch origin main
           git reset --hard origin/main
+          PULL_END=$(date +%s)
+          echo "✓ Git pull completed in $((PULL_END - PULL_START))s"
           
+          INSTALL_START=$(date +%s)
           echo "Installing dependencies..."
           npm ci --omit=dev
+          INSTALL_END=$(date +%s)
+          echo "✓ npm install completed in $((INSTALL_END - INSTALL_START))s"
           
+          ENV_START=$(date +%s)
           echo "Setting up environment variables..."
           cat > .env.local << 'ENVEOF'
           SUPABASE_URL=${{ secrets.SUPABASE_URL }}
@@ -105,10 +113,16 @@ jobs:
           REFRESH_MAX_AGE_SECONDS=${{ secrets.REFRESH_MAX_AGE_SECONDS }}
           CPU_THRESHOLD=${{ secrets.CPU_THRESHOLD }}
           ENVEOF
+          ENV_END=$(date +%s)
+          echo "✓ Environment variables set in $((ENV_END - ENV_START))s"
           
+          RESTART_START=$(date +%s)
           echo "Restarting Fastify backend..."
           pm2 restart fastify-server || pm2 start "npm run start:fastify" --name "fastify-server" --env production
+          RESTART_END=$(date +%s)
+          echo "✓ PM2 restart completed in $((RESTART_END - RESTART_START))s"
           
+          HEALTH_START=$(date +%s)
           echo "Waiting for services to start..."
           sleep 5
           
@@ -121,9 +135,23 @@ jobs:
             echo "Attempt $i/10 - Waiting for backend..."
             sleep 2
           done
+          HEALTH_END=$(date +%s)
+          echo "✓ Health check completed in $((HEALTH_END - HEALTH_START))s"
+          
+          DEPLOY_END=$(date +%s)
+          TOTAL_TIME=$((DEPLOY_END - DEPLOY_START))
+          
+          echo "---DEPLOYMENT TIMING SUMMARY---"
+          echo "Git pull: $((PULL_END - PULL_START))s"
+          echo "npm install: $((INSTALL_END - INSTALL_START))s"
+          echo "Environment setup: $((ENV_END - ENV_START))s"
+          echo "PM2 restart: $((RESTART_END - RESTART_START))s"
+          echo "Health check: $((HEALTH_END - HEALTH_START))s"
+          echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s ($((TOTAL_TIME / 60))m $((TOTAL_TIME % 60))s)"
+          echo "---END TIMING SUMMARY---"
           
           pm2 save
-          echo "Deployment completed successfully!"
+          echo "Deployment completed successfully at $(date)!"
           pm2 status
           DEPLOYEOF
           

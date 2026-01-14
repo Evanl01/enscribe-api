@@ -10,7 +10,6 @@ dotenv.config({ path: envPath });
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import pino from 'pino';
-import pinoHttp from 'pino-http';
 import authenticationPlugin from './plugins/authentication.js';
 import { ALLOWED_ORIGINS_LIST } from './middleware/cors.js';
 import authRoutes from './routes/auth.js';
@@ -47,41 +46,44 @@ async function createFastifyApp(options = {}) {
     } : undefined,
   });
 
-  // Create Fastify instance with Pino logger
+  // Create Fastify instance with Pino logger (disable default request logging)
   const fastify = Fastify({
     logger: pinoLogger,
+    disableRequestLogging: true, // Disable Fastify's auto request logging
   });
 
   // Add request/response logging middleware (skip health checks)
   fastify.register(async (fastifyInstance) => {
     fastifyInstance.addHook('onRequest', async (request, reply) => {
-      // Skip logging for health checks
+      // Skip logging for health checks and root path
       if (request.url === '/' || request.url === '/health') {
         return;
       }
 
-      request.log.info({
-        event: 'request_received',
+      // Log in concise format for CloudWatch
+      fastify.log.info({
+        event: 'request',
         method: request.method,
         url: request.url,
-        remoteAddress: request.ip,
-        userAgent: request.headers['user-agent'],
-      }, `[${request.method}] ${request.url}`);
+        ip: request.ip,
+      });
     });
 
     fastifyInstance.addHook('onResponse', async (request, reply) => {
-      // Skip logging for health checks
+      // Skip logging for health checks and root path
       if (request.url === '/' || request.url === '/health') {
         return;
       }
 
-      request.log.info({
-        event: 'request_completed',
+      // Log response in concise format
+      const responseTime = reply.getResponseTime ? Math.round(reply.getResponseTime()) : 0;
+      fastify.log.info({
+        event: 'response',
         method: request.method,
         url: request.url,
-        statusCode: reply.statusCode,
-        responseTime: `${reply.getResponseTime().toFixed(2)}ms`,
-      }, `[${request.method}] ${request.url} → ${reply.statusCode}`);
+        status: reply.statusCode,
+        responseTime: `${responseTime}ms`,
+      });
     });
   });
 
