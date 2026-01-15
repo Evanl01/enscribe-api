@@ -33,7 +33,7 @@ async function createFastifyApp(options = {}) {
     environment = process.env.NODE_ENV || 'development',
   } = options;
 
-  // Configure Pino logger for CloudWatch
+  // Configure Pino logger for CloudWatch with request filtering
   const pinoLogger = pino({
     level: environment === 'production' ? 'info' : 'debug',
     transport: environment === 'development' ? {
@@ -46,20 +46,35 @@ async function createFastifyApp(options = {}) {
     } : undefined,
   });
 
+  // Override logger methods to filter health checks and root path
+  const createFilteredMethod = (originalMethod) => {
+    return function(...args) {
+      const logData = typeof args[0] === 'object' ? args[0] : {};
+      const url = logData.url;
+      
+      // Skip logs for health checks and root path
+      if (url === '/health' || url === '/') {
+        return;
+      }
+      
+      return originalMethod.apply(this, args);
+    };
+  };
+
+  pinoLogger.info = createFilteredMethod(pinoLogger.info.bind(pinoLogger));
+  pinoLogger.warn = createFilteredMethod(pinoLogger.warn.bind(pinoLogger));
+  pinoLogger.error = createFilteredMethod(pinoLogger.error.bind(pinoLogger));
+  pinoLogger.debug = createFilteredMethod(pinoLogger.debug.bind(pinoLogger));
+
   // Create Fastify instance with Pino logger (disable default request logging)
   const fastify = Fastify({
     logger: pinoLogger,
     disableRequestLogging: true, // Disable Fastify's auto request logging
   });
 
-  // Add request/response logging middleware (skip health checks)
+  // Add request/response logging middleware (health checks filtered at logger level)
   fastify.register(async (fastifyInstance) => {
     fastifyInstance.addHook('onRequest', async (request, reply) => {
-      // Skip logging for health checks and root path
-      if (request.url === '/' || request.url === '/health') {
-        return;
-      }
-
       // Log in concise format for CloudWatch
       fastify.log.info({
         event: 'request',
@@ -70,11 +85,6 @@ async function createFastifyApp(options = {}) {
     });
 
     fastifyInstance.addHook('onResponse', async (request, reply) => {
-      // Skip logging for health checks and root path
-      if (request.url === '/' || request.url === '/health') {
-        return;
-      }
-
       // Log response in concise format
       const responseTime = reply.getResponseTime ? Math.round(reply.getResponseTime()) : 0;
       fastify.log.info({
