@@ -36,6 +36,23 @@ async function createFastifyApp(options = {}) {
   // Configure Pino logger for CloudWatch with request filtering
   const pinoLogger = pino({
     level: environment === 'production' ? 'info' : 'debug',
+    serializers: {
+      // Custom serializer to filter out /health and / logs
+      req: (req) => {
+        const url = req.url;
+        // Return null to skip logging this request entirely
+        if (url === '/health' || url === '/') {
+          return null;
+        }
+        return {
+          method: req.method,
+          url: req.url,
+          hostname: req.hostname,
+          remoteAddress: req.remoteAddress,
+          remotePort: req.remotePort,
+        };
+      },
+    },
     transport: environment === 'development' ? {
       target: 'pino-pretty',
       options: {
@@ -46,46 +63,28 @@ async function createFastifyApp(options = {}) {
     } : undefined,
   });
 
-  // Override logger methods to filter health checks and root path
-  const createFilteredMethod = (originalMethod) => {
-    return function(...args) {
-      const logData = typeof args[0] === 'object' ? args[0] : {};
-      const url = logData.url;
-      
-      // Skip logs for health checks and root path
-      if (url === '/health' || url === '/') {
-        return;
-      }
-      
-      return originalMethod.apply(this, args);
-    };
-  };
-
-  pinoLogger.info = createFilteredMethod(pinoLogger.info.bind(pinoLogger));
-  pinoLogger.warn = createFilteredMethod(pinoLogger.warn.bind(pinoLogger));
-  pinoLogger.error = createFilteredMethod(pinoLogger.error.bind(pinoLogger));
-  pinoLogger.debug = createFilteredMethod(pinoLogger.debug.bind(pinoLogger));
-
-  // Create Fastify instance with Pino logger (disable default request logging)
+  // Create Fastify instance with Pino logger
   const fastify = Fastify({
     logger: pinoLogger,
-    disableRequestLogging: true, // Disable Fastify's auto request logging
+    disableRequestLogging: true, // Completely disable Fastify's auto request logging
   });
 
-  // Add request/response logging middleware (health checks filtered at logger level)
-  fastify.register(async (fastifyInstance) => {
-    fastifyInstance.addHook('onRequest', async (request, reply) => {
-      // Log in concise format for CloudWatch
+  // Add request/response logging for non-health endpoints
+  fastify.addHook('onRequest', async (request, reply) => {
+    // Only log actual API requests (not health checks)
+    if (request.url !== '/' && request.url !== '/health') {
       fastify.log.info({
         event: 'request',
         method: request.method,
         url: request.url,
         ip: request.ip,
       });
-    });
+    }
+  });
 
-    fastifyInstance.addHook('onResponse', async (request, reply) => {
-      // Log response in concise format
+  fastify.addHook('onResponse', async (request, reply) => {
+    // Only log actual API responses (not health checks)
+    if (request.url !== '/' && request.url !== '/health') {
       const responseTime = reply.getResponseTime ? Math.round(reply.getResponseTime()) : 0;
       fastify.log.info({
         event: 'response',
@@ -94,7 +93,7 @@ async function createFastifyApp(options = {}) {
         status: reply.statusCode,
         responseTime: `${responseTime}ms`,
       });
-    });
+    }
   });
 
   // Register CORS plugin with production-ready allowed origins
