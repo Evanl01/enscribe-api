@@ -44,16 +44,16 @@ jobs:
     
     permissions:
       contents: read
-      id-token: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials via IAM User
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::637423355461:role/enscribe-api-ec2-instance-role
+          aws-access-key-id: ${{ secrets.AWS_ACTIONS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_ACTIONS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
       - name: Deploy via Systems Manager
