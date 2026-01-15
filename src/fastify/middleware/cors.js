@@ -9,6 +9,8 @@ const ALLOWED_ORIGINS = [
   'https://d2okt95q961mml.cloudfront.net',
   'https://enscribe-web-prod-static.s3.amazonaws.com',
   'https://enscribe.sjpedgi.doctor',
+  'https://enscribe-web.vercel.app',
+  'https://emscribe.vercel.app',
 
   // Development origins
   'http://localhost:3000',

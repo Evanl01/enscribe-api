@@ -103,7 +103,6 @@ jobs:
           FASTIFY_HOST=0.0.0.0
           FASTIFY_PORT=${{ secrets.FASTIFY_PORT }}
           NODE_ENV=production
-          ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_URL=${{ secrets.OPENAI_API_URL }}
           GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
