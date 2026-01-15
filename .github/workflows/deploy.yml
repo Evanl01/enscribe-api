@@ -62,7 +62,17 @@ jobs:
         run: |
           # Create deployment script with all secrets
           cat > /tmp/deploy.sh << 'DEPLOYEOF'
+          #!/bin/bash
           set -e
+          
+          # Set required environment variables for SSM
+          export HOME=/home/ssm-user
+          export USER=ssm-user
+          
+          # Load NVM for node/npm
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+          
           DEPLOY_START=$(date +%s)
           echo "Starting deployment at $(date)"
           cd /opt/enscribe-api
@@ -70,14 +80,13 @@ jobs:
           PULL_START=$(date +%s)
           echo "Pulling latest code from main branch..."
           
-          # Fix git ownership (SSM runs as ssm-user, directory already owned by ssm-user)
           git config --global --add safe.directory /opt/enscribe-api
+          git fetch origin main || { echo "Git fetch failed"; exit 1; }
+          git reset --hard origin/main || { echo "Git reset failed"; exit 1; }
           
-          # Add timeout to git operations (30 seconds max)
-          timeout 30 git fetch origin main || { echo "Git fetch timed out or failed"; exit 1; }
-          timeout 30 git reset --hard origin/main || { echo "Git reset timed out or failed"; exit 1; }
           PULL_END=$(date +%s)
           echo "✓ Git pull completed in $((PULL_END - PULL_START))s"
+          echo "Current commit: $(git rev-parse --short HEAD)"
           
           INSTALL_START=$(date +%s)
           echo "Installing dependencies..."
@@ -123,10 +132,13 @@ jobs:
           
           RESTART_START=$(date +%s)
           echo "Restarting Fastify backend..."
-          # Kill any processes stuck on port 3001
+          # Kill any stuck processes on port 3001
           lsof -ti:3001 | xargs kill -9 2>/dev/null || true
           sleep 2
-          pm2 restart fastify-server || pm2 start "npm run start:fastify" --name "fastify-server" --env production
+          
+          # Restart or start PM2
+          pm2 restart fastify-server 2>/dev/null || pm2 start npm --name "fastify-server" -- run start:fastify
+          
           RESTART_END=$(date +%s)
           echo "✓ PM2 restart completed in $((RESTART_END - RESTART_START))s"
           
@@ -135,17 +147,20 @@ jobs:
           sleep 5
           
           echo "Verifying backend health..."
-          HEALTH_TIMEOUT=30  # 30 second timeout for health check
-          HEALTH_CHECK_START=$(date +%s)
-          
-          while [ $(($(date +%s) - HEALTH_CHECK_START)) -lt $HEALTH_TIMEOUT ]; do
+          for i in {1..10}; do
             if curl -f -m 5 http://localhost:${{ secrets.FASTIFY_PORT }}/health > /dev/null 2>&1; then
               echo "✓ Fastify backend is healthy on port ${{ secrets.FASTIFY_PORT }}"
               break
             fi
-            echo "Waiting for backend to respond..."
+            if [ $i -eq 10 ]; then
+              echo "❌ Health check failed after 10 attempts"
+              pm2 logs fastify-server --lines 20
+              exit 1
+            fi
+            echo "Waiting for backend... ($i/10)"
             sleep 2
           done
+          
           HEALTH_END=$(date +%s)
           echo "✓ Health check completed in $((HEALTH_END - HEALTH_START))s"
           
@@ -158,10 +173,10 @@ jobs:
           echo "Environment setup: $((ENV_END - ENV_START))s"
           echo "PM2 restart: $((RESTART_END - RESTART_START))s"
           echo "Health check: $((HEALTH_END - HEALTH_START))s"
-          echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s ($((TOTAL_TIME / 60))m $((TOTAL_TIME % 60))s)"
+          echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s"
           echo "---END TIMING SUMMARY---"
           
-          # Write timing to file for retrieval even if GitHub Actions times out
+          # Write timing to file for retrieval
           {
             echo "---DEPLOYMENT TIMING SUMMARY---"
             echo "Git pull: $((PULL_END - PULL_START))s"
@@ -169,12 +184,12 @@ jobs:
             echo "Environment setup: $((ENV_END - ENV_START))s"
             echo "PM2 restart: $((RESTART_END - RESTART_START))s"
             echo "Health check: $((HEALTH_END - HEALTH_START))s"
-            echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s ($((TOTAL_TIME / 60))m $((TOTAL_TIME % 60))s)"
+            echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s"
             echo "---END TIMING SUMMARY---"
           } > /tmp/deploy-timing.txt
           
           pm2 save
-          echo "Deployment completed successfully at $(date)!"
+          echo "✅ Deployment completed successfully at $(date)!"
           pm2 status
           DEPLOYEOF
           
@@ -191,32 +206,6 @@ jobs:
             --output text)
           
           echo "Command ID: $COMMAND_ID"
-          
-          # Don't wait - deployment runs asynchronously on EC2
           echo "✅ Deployment triggered successfully!"
           echo "Deployment is running in the background on EC2."
           echo "Check status: aws ssm get-command-invocation --command-id $COMMAND_ID --instance-id $INSTANCE_ID --region us-east-1"
-          echo "Check timing: ssh to EC2 and run: cat /tmp/deploy-timing.txt"
-
-          # Wait 10 seconds for command to start
-          sleep 10
-
-          # Check final status (don't poll, just check once)
-          STATUS=$(aws ssm get-command-invocation \
-          --command-id "$COMMAND_ID" \
-          --instance-id "$INSTANCE_ID" \
-          --region us-east-1 \
-          --query 'Status' \
-          --output text 2>/dev/null || echo "Pending")
-
-          echo "Deployment status: $STATUS"
-
-          # If it's already failed or succeeded, show output
-          if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ]; then
-          aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --region us-east-1 \
-              --query '[StandardOutputContent,StandardErrorContent]' \
-              --output text
-          fi
