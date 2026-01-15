@@ -70,8 +70,7 @@ jobs:
           PULL_START=$(date +%s)
           echo "Pulling latest code from main branch..."
           
-          # Fix git ownership issue (SSM runs as ssm-user, not ec2-user)
-          sudo chown -R ssm-user:ssm-user /opt/enscribe-api
+          # Fix git ownership (SSM runs as ssm-user, directory already owned by ssm-user)
           git config --global --add safe.directory /opt/enscribe-api
           
           git fetch origin main
