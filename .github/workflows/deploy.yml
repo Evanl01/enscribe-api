@@ -73,8 +73,9 @@ jobs:
           # Fix git ownership (SSM runs as ssm-user, directory already owned by ssm-user)
           git config --global --add safe.directory /opt/enscribe-api
           
-          git fetch origin main
-          git reset --hard origin/main
+          # Add timeout to git operations (30 seconds max)
+          timeout 30 git fetch origin main || { echo "Git fetch timed out or failed"; exit 1; }
+          timeout 30 git reset --hard origin/main || { echo "Git reset timed out or failed"; exit 1; }
           PULL_END=$(date +%s)
           echo "✓ Git pull completed in $((PULL_END - PULL_START))s"
           
@@ -122,6 +123,9 @@ jobs:
           
           RESTART_START=$(date +%s)
           echo "Restarting Fastify backend..."
+          # Kill any processes stuck on port 3001
+          lsof -ti:3001 | xargs kill -9 2>/dev/null || true
+          sleep 2
           pm2 restart fastify-server || pm2 start "npm run start:fastify" --name "fastify-server" --env production
           RESTART_END=$(date +%s)
           echo "✓ PM2 restart completed in $((RESTART_END - RESTART_START))s"
