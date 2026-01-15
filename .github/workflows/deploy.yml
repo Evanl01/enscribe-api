@@ -131,12 +131,15 @@ jobs:
           sleep 5
           
           echo "Verifying backend health..."
-          for i in {1..10}; do
-            if curl -f http://localhost:${{ secrets.FASTIFY_PORT }}/health > /dev/null 2>&1; then
+          HEALTH_TIMEOUT=30  # 30 second timeout for health check
+          HEALTH_CHECK_START=$(date +%s)
+          
+          while [ $(($(date +%s) - HEALTH_CHECK_START)) -lt $HEALTH_TIMEOUT ]; do
+            if curl -f -m 5 http://localhost:${{ secrets.FASTIFY_PORT }}/health > /dev/null 2>&1; then
               echo "✓ Fastify backend is healthy on port ${{ secrets.FASTIFY_PORT }}"
               break
             fi
-            echo "Attempt $i/10 - Waiting for backend..."
+            echo "Waiting for backend to respond..."
             sleep 2
           done
           HEALTH_END=$(date +%s)
@@ -153,6 +156,18 @@ jobs:
           echo "Health check: $((HEALTH_END - HEALTH_START))s"
           echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s ($((TOTAL_TIME / 60))m $((TOTAL_TIME % 60))s)"
           echo "---END TIMING SUMMARY---"
+          
+          # Write timing to file for retrieval even if GitHub Actions times out
+          {
+            echo "---DEPLOYMENT TIMING SUMMARY---"
+            echo "Git pull: $((PULL_END - PULL_START))s"
+            echo "npm install: $((INSTALL_END - INSTALL_START))s"
+            echo "Environment setup: $((ENV_END - ENV_START))s"
+            echo "PM2 restart: $((RESTART_END - RESTART_START))s"
+            echo "Health check: $((HEALTH_END - HEALTH_START))s"
+            echo "TOTAL DEPLOYMENT TIME: ${TOTAL_TIME}s ($((TOTAL_TIME / 60))m $((TOTAL_TIME % 60))s)"
+            echo "---END TIMING SUMMARY---"
+          } > /tmp/deploy-timing.txt
           
           pm2 save
           echo "Deployment completed successfully at $(date)!"
