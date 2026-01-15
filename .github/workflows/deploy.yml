@@ -69,6 +69,10 @@ jobs:
           
           PULL_START=$(date +%s)
           echo "Pulling latest code from main branch..."
+          
+          # Fix git ownership issue (happens when repo is owned by different user)
+          git config --global --add safe.directory /opt/enscribe-api
+          
           git fetch origin main
           git reset --hard origin/main
           PULL_END=$(date +%s)
