@@ -7,11 +7,11 @@
  */
 
 /**
- * Get Azure OpenAI API configuration for a specific deployment
- * @param {string} deploymentName - Azure deployment name (e.g., 'gpt-4o-chat-deployment')
+ * Build Azure OpenAI API configuration for a specific deployment
+ * @param {string} deploymentName - Azure deployment name (e.g., 'o3')
  * @returns {object} Configuration object with endpoint, headers, and metadata
  */
-export function getAzureOpenAIConfig(deploymentName) {
+function buildAzureOpenAIConfig(deploymentName) {
   const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
   const azureApiKey = process.env.AZURE_OPENAI_KEY;
   const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
@@ -44,21 +44,10 @@ export function getAzureOpenAIConfig(deploymentName) {
 }
 
 /**
- * Get Azure OpenAI config for GPT-4o transcription
+ * Get Azure OpenAI config for configured deployment from environment
  * @returns {object} Configuration object
  */
-export function getAzureOpenAIConfigGPT4O() {
-  const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_GPT4O || 'gpt-4o-chat-deployment';
-  return getAzureOpenAIConfig(deploymentName);
-}
-
-/**
- * Get Azure OpenAI config for SOAP note generation (o3)
- * @returns {object} Configuration object
- */
-export function getAzureOpenAIConfigSOAP() {
-  // Prioritize o3 for better reasoning and SOAP generation
-  const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT_O3;
-  
-  return getAzureOpenAIConfig(deploymentName);
+export function getAzureOpenAIConfig() {
+  const deploymentName = process.env.AZURE_OPENAI_DEPLOYMENT || 'o3';
+  return buildAzureOpenAIConfig(deploymentName);
 }

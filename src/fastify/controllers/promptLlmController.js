@@ -14,10 +14,9 @@
 import { getSupabaseClient } from '../../utils/supabase.js';
 import { authenticateRequest } from '../../utils/authenticateRequest.js';
 import * as gptRequestBodies from '../../utils/gptRequestBodies.js';
-import * as azureSoapRequestBody from '../../utils/azureRequestBody.js';
 import { unmask_phi } from '../../utils/maskPhiHelper.js';
 import { transcribe_expand_mask } from './transcribeController.js';
-import { getAzureOpenAIConfigGPT4O, getAzureOpenAIConfigSOAP } from '../../utils/azureOpenaiConfig.js';
+import { getAzureOpenAIConfig } from '../../utils/azureOpenaiConfig.js';
 
 /**
  * Helper: Clean raw text from LLMs to normalize problematic characters for EHR systems
@@ -192,9 +191,8 @@ async function azureGptAPIReq(reqBody) {
         // Dynamically import AzureOpenAI to avoid hard dependency
         const { AzureOpenAI } = await import('openai');
         
-        // Get Azure config (determines which deployment to use based on request)
-        // For now, we use SOAP config since this function is called for SOAP generation
-        const azureConfig = getAzureOpenAIConfigSOAP();
+        // Get Azure config from environment
+        const azureConfig = getAzureOpenAIConfig();
         
         console.log(`[azureGptAPIReq] Using Azure deployment: ${azureConfig.deploymentName}`);
         
