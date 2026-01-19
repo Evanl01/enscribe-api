@@ -258,25 +258,32 @@ async function testUnmaskPhi(accessToken) {
     expectedFields: ['unmaskedText'],
   });
 
-  // Test 6: Unmask without tokens
+  // Test 6: Unmask with empty tokens (should return masked text unchanged)
   const test6Body = {
-    text: 'Some masked text [PATIENT-1] visited [PROVIDER-1].',
+    text: 'Some text with {{NAME_1}} and {{PROFESSION_2}}.',
     tokens: {},
   };
   console.log(`  Test 6 body: ${JSON.stringify(test6Body).substring(0, 200)}`);
-  await runner.test('Handle unmask without tokens', {
+  await runner.test('Handle unmask with empty tokens (tokens not found)', {
     method: 'POST',
     endpoint: '/api/aws/unmask-phi',
     body: test6Body,
     headers,
     expectedStatus: 200,
     expectedFields: ['unmaskedText'],
+    customValidator: (response) => {
+      // When tokens are empty, masked tokens should remain unchanged
+      return {
+        passed: response.unmaskedText.includes('{{NAME_1}}'),
+        message: 'Tokens not found should remain masked'
+      };
+    },
   });
 
-  // Test 7: Missing text field in unmask request
-  const test7Body = { tokens: {} };
+  // Test 7: Missing tokens field in unmask request
+  const test7Body = { text: 'Some {{NAME_1}} text' };
   console.log(`  Test 7 body: ${JSON.stringify(test7Body).substring(0, 200)}`);
-  await runner.test('Reject unmask without text field', {
+  await runner.test('Reject unmask without tokens field', {
     method: 'POST',
     endpoint: '/api/aws/unmask-phi',
     body: test7Body,
@@ -292,7 +299,13 @@ async function testUnmaskPhi(accessToken) {
   });
 
   // Test 8: Missing authentication on unmask
-  const test8Body = { text: 'Some text', tokens: {} };
+  const test8Body = { 
+    text: 'Patient {{NAME_1}} with {{PROFESSION_2}}', 
+    tokens: {
+      'NAME_1': 'John Smith',
+      'PROFESSION_2': 'accountant'
+    }
+  };
   console.log(`  Test 8 body: ${JSON.stringify(test8Body).substring(0, 200)}`);
   await runner.test('Reject unmask without authentication', {
     method: 'POST',

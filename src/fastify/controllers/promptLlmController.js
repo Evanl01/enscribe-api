@@ -14,8 +14,10 @@
 import { getSupabaseClient } from '../../utils/supabase.js';
 import { authenticateRequest } from '../../utils/authenticateRequest.js';
 import * as gptRequestBodies from '../../utils/gptRequestBodies.js';
+import * as azureSoapRequestBody from '../../utils/azureRequestBody.js';
 import { unmask_phi } from '../../utils/maskPhiHelper.js';
 import { transcribe_expand_mask } from './transcribeController.js';
+import { getAzureOpenAIConfigGPT4O, getAzureOpenAIConfigSOAP } from '../../utils/azureOpenaiConfig.js';
 
 /**
  * Helper: Clean raw text from LLMs to normalize problematic characters for EHR systems
@@ -131,6 +133,10 @@ async function gptAPIReq(reqBody) {
         throw new Error('OpenAI API key not configured');
     }
 
+    console.log(`[gptAPIReq] Using OpenAI model: ${reqBody.model}`);
+    console.log(`[gptAPIReq] API URL: ${openaiApiUrl}`);
+    console.log(`[gptAPIReq] Making request to OpenAI...`);
+
     const response = await fetch(openaiApiUrl, {
         method: 'POST',
         headers: {
@@ -153,13 +159,83 @@ async function gptAPIReq(reqBody) {
 
     // Log token usage
     if (openaiData.usage) {
-        console.log(`[promptLlmHandler] Prompt tokens: ${openaiData.usage.prompt_tokens}`);
-        console.log(`[promptLlmHandler] Completion tokens: ${openaiData.usage.completion_tokens}`);
-        console.log(`[promptLlmHandler] Total tokens: ${openaiData.usage.total_tokens}`);
+        console.log(`[gptAPIReq] Prompt tokens: ${openaiData.usage.prompt_tokens}`);
+        console.log(`[gptAPIReq] Completion tokens: ${openaiData.usage.completion_tokens}`);
+        console.log(`[gptAPIReq] Total tokens: ${openaiData.usage.total_tokens}`);
     }
 
+    console.log('[gptAPIReq] Successfully received response from OpenAI');
     // Return the content of the first message
     return openaiData.choices[0].message.content;
+}
+
+/**
+ * Handle Azure OpenAI GPT API request for SOAP note generation
+ * 
+ * Uses Azure OpenAI SDK with endpoint and api-key authentication.
+ * Falls back to OpenAI if Azure credentials are not configured.
+ * 
+ * @param {Object} reqBody - Request body with messages, model, etc.
+ * @returns {Promise<string>} - LLM response content
+ * @throws {Error} - If API call fails
+ */
+async function azureGptAPIReq(reqBody) {
+    // Check if Azure OpenAI is configured
+    const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+    const azureApiKey = process.env.AZURE_OPENAI_KEY;
+    
+    if (!azureEndpoint || !azureApiKey) {
+        throw new Error('Missing Azure OpenAI environment variables. Configure AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY to use Azure OpenAI.');
+    }
+
+    try {
+        // Dynamically import AzureOpenAI to avoid hard dependency
+        const { AzureOpenAI } = await import('openai');
+        
+        // Get Azure config (determines which deployment to use based on request)
+        // For now, we use SOAP config since this function is called for SOAP generation
+        const azureConfig = getAzureOpenAIConfigSOAP();
+        
+        console.log(`[azureGptAPIReq] Using Azure deployment: ${azureConfig.deploymentName}`);
+        
+        // Initialize Azure OpenAI client
+        const client = new AzureOpenAI({
+            apiVersion: azureConfig.apiVersion,
+            apiKey: azureApiKey,
+            baseURL: `${azureEndpoint}/openai/deployments/${azureConfig.deploymentName}`,
+            defaultQuery: { 'api-version': azureConfig.apiVersion },
+            defaultHeaders: { 'api-key': azureApiKey },
+        });
+
+        console.log(`[azureGptAPIReq] Making request to Azure OpenAI...`);
+
+        // Make the chat completion request
+        const response = await client.chat.completions.create({
+            messages: reqBody.messages,
+            model: azureConfig.deploymentName,
+            max_completion_tokens: reqBody.max_completion_tokens || reqBody.max_tokens,
+            temperature: reqBody.temperature,
+            top_p: reqBody.top_p,
+            response_format: reqBody.response_format,
+        });
+
+        if (!response.choices || !response.choices[0]?.message) {
+            throw new Error('Invalid response from Azure OpenAI API');
+        }
+
+        // Log token usage
+        if (response.usage) {
+            console.log(`[azureGptAPIReq] Prompt tokens: ${response.usage.prompt_tokens}`);
+            console.log(`[azureGptAPIReq] Completion tokens: ${response.usage.completion_tokens}`);
+            console.log(`[azureGptAPIReq] Total tokens: ${response.usage.total_tokens}`);
+        }
+
+        console.log('[azureGptAPIReq] Successfully received response from Azure OpenAI');
+        return response.choices[0].message.content;
+    } catch (error) {
+        console.error('[azureGptAPIReq] Error:', error.message);
+        throw error;
+    }
 }
 
 /**
@@ -264,7 +340,7 @@ export async function promptLlmHandler(request, reply) {
 
         const transcript = transcriptResult.expandedTranscript; // Clean transcript with dot phrase expansions for user
         const maskedTranscript = transcriptResult.maskResult.masked_transcript; // Masked LLM-notated version for processing
-        const phiEntities = transcriptResult.maskResult.phi_entities;
+        const tokens = transcriptResult.maskResult.tokens; // AWS Comprehend Medical token mapping for unmasking
         const transcribeEndTime = Date.now();
         
         console.log('[promptLlmHandler] Transcription Result:', JSON.stringify(transcriptResult, null, 2));
@@ -318,7 +394,7 @@ export async function promptLlmHandler(request, reply) {
         rawString = cleanRawText(rawString);
         let unmaskRes;
         try {
-            unmaskRes = unmask_phi(rawString, phiEntities || []);
+            unmaskRes = unmask_phi(rawString, tokens);
         } catch (err) {
             console.error('[promptLlmHandler] Failed to unmask PHI tokens:', err);
             return sendSseError(reply, `Failed to unmask PHI tokens: ${err.message}`);

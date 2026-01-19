@@ -85,7 +85,7 @@ async function createFastifyApp(options = {}) {
   fastify.addHook('onResponse', async (request, reply) => {
     // Only log actual API responses (not health checks)
     if (request.url !== '/' && request.url !== '/health') {
-      const responseTime = reply.getResponseTime ? Math.round(reply.getResponseTime()) : 0;
+      const responseTime = reply.elapsedTime ? Math.round(reply.elapsedTime) : 0;
       fastify.log.info({
         event: 'response',
         method: request.method,

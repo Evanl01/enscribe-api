@@ -72,32 +72,55 @@ export async function mask_phi(transcript, mask_threshold = 0.15) {
 }
 
 /**
- * Unmasks PHI tokens in the form {{TYPE_ID}} using provided tokens object.
+ * Unmasks PHI tokens in the form {{TYPE_ID}} using AWS Comprehend Medical tokens dictionary.
  * 
- * Replaces tokens that exactly match <Type>_<Id> with original text from tokens dict.
+ * Performs direct O(1) dictionary lookup for each token, safely handling any order of appearance.
+ * Works correctly even if entities appear in random order in the SOAP note.
  * 
  * @param {string} maskedText - Transcript with {{TYPE_ID}} tokens
- * @param {Object} [tokens={}] - Object mapping token keys to original text
+ * @param {Object} tokens - Object mapping token keys ("TYPE_ID") to original text from AWS Comprehend
  * @returns {Object} - { unmasked_transcript }
- * @throws {Error} - If maskedText is not a string
+ * @throws {Error} - If maskedText is not a string or tokens is not an object
  */
-export function unmask_phi(maskedText, tokens = {}) {
+export function unmask_phi(maskedText, tokens) {
   if (!maskedText || typeof maskedText !== 'string') {
     throw new Error('maskedText is required and must be a string');
   }
 
+  if (!tokens || typeof tokens !== 'object') {
+    throw new Error('tokens object from AWS Comprehend Medical is required for unmasking');
+  }
+
+  // Log input details
+  const tokenCount = Object.keys(tokens).length;
+  const tokenKeys = Object.keys(tokens);
+  console.log('[unmask_phi] Starting unmask operation');
+  console.log('[unmask_phi] Token keys:', tokenKeys);
+  
+  // Count masked tokens in input
+  const maskedTokenPattern = /\{\{([^}]+)\}\}/g;
+  const maskedTokensInText = maskedText.match(maskedTokenPattern) || [];
+  console.log('[unmask_phi] Masked tokens found in input:', maskedTokensInText.length);
+  console.log('[unmask_phi] Masked tokens:', maskedTokensInText);
+  
+  let unmaskedCount = 0;
+  let missingTokenCount = 0;
+
   const unmasked = maskedText.replace(/\{\{([^}]+)\}\}/g, (match, inner) => {
-    // Look up token in the provided tokens object
     const replacement = tokens[inner];
     
     if (replacement === undefined) {
-      console.warn('PHI token has no matching replacement:', match);
-      return match; // leave unchanged
+      console.error('[unmask_phi] PHI token missing from tokens dict:', match);
+      missingTokenCount++;
+      return match; // leave unchanged if not found
     }
 
+    unmaskedCount++;
+    console.log(`[unmask_phi] Unmasked ${match} -> "${replacement}"`);
     return replacement;
   });
 
+  console.log('[unmask_phi] Unmasking complete');
   return { unmasked_transcript: unmasked };
 }
 
