@@ -248,13 +248,41 @@ async function authRoutes(fastify, opts) {
       const wrapper = request.cookies.refresh_token || null;
       
       if (!wrapper) {
+        console.log('[POST /auth/refresh] 401 - No refresh token cookie found');
         return reply.status(401).send({ error: 'No refresh token cookie found' });
       }
 
-      console.log('[POST /auth/refresh] Attempting to refresh token');
+      // Extract tid from wrapper for logging
+      let wrapperTid = null;
+      try {
+        const parts = wrapper.split('.');
+        if (parts.length === 3) {
+          const p64 = parts[1];
+          const payload = JSON.parse(Buffer.from(p64, 'base64url').toString('utf8'));
+          wrapperTid = payload.tid;
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      console.log('[POST /auth/refresh] Starting refresh', {
+        wrapperTid,
+        wrapperLength: wrapper?.length || 0,
+        wrapperPreview: wrapper ? wrapper.substring(0, 50) + '...' : 'null',
+        timestamp: new Date().toISOString(),
+      });
+
       const result = await authController.refreshRefreshToken(wrapper);
 
       if (!result.success) {
+        console.log('[POST /auth/refresh] 401 - Refresh failed', {
+          error: result.error,
+          wrapperTid,
+          userId: result.debugUserId || 'unknown',
+          oldTokenId: result.debugOldTokenId || 'unknown',
+          timestamp: new Date().toISOString(),
+        });
+        
         // Clear invalid cookie
         const clearCookie = authController.makeRefreshCookie('', { maxAge: 0 });
         reply.header('set-cookie', clearCookie);
