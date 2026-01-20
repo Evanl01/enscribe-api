@@ -13,12 +13,14 @@ export async function makeRequest(method, url, options = {}) {
   const { headers = {}, body = null, expectedStatus = null } = options;
 
   try {
+    // Only set Content-Type if there's a body
+    const requestHeaders = body 
+      ? { 'Content-Type': 'application/json', ...headers }
+      : headers;
+
     const response = await fetch(url, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
+      headers: requestHeaders,
       body: body ? JSON.stringify(body) : null,
     });
 

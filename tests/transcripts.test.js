@@ -181,20 +181,21 @@ async function runTranscriptsTests() {
     });
   }
 
-  // Test 7: POST /transcripts with valid data (create for 3rd recording)
-  // Uses 3rd recording (index 2) which should not have a transcript from setup.test.js
+  // Test 7: POST /transcripts with valid data (create for last recording)
+  // Uses last recording (by ID) which should not have a transcript from setup.test.js
+  // setup.test.js only creates transcripts for first 2 recordings
   let createdTranscriptId = null;
   let test7Passed = false;
   let test7Message = '';
   
-  if (accessToken && testData.recordings.length >= 3) {
+  if (accessToken && testData.recordings.length > 0) {
     // Sort recordings by ID (matching setup.test.js ordering)
     const recordingsSorted = testData.recordings
       .filter(r => r.id !== null)
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
     
-    if (recordingsSorted.length >= 3) {
-      const thirdRecording = recordingsSorted[2]; // 3rd recording (0-indexed: position 2)
+    if (recordingsSorted.length > 0) {
+      const lastRecording = recordingsSorted[recordingsSorted.length - 1]; // Last recording by ID
       
       const result = await runner.test('POST /api/transcripts - create transcript', {
         method: 'POST',
@@ -204,7 +205,7 @@ async function runTranscriptsTests() {
         },
         body: {
           transcript_text: 'This is a test transcript for the recording.',
-          recording_id: thirdRecording.id,
+          recording_id: lastRecording.id,
         },
         expectedStatus: 201,
       });

@@ -273,6 +273,12 @@ async function testUnmaskPhi(accessToken) {
     expectedFields: ['unmaskedText'],
     customValidator: (response) => {
       // When tokens are empty, masked tokens should remain unchanged
+      if (!response.unmaskedText) {
+        return {
+          passed: false,
+          message: `Expected unmaskedText field but got: ${JSON.stringify(response)}`
+        };
+      }
       return {
         passed: response.unmaskedText.includes('{{NAME_1}}'),
         message: 'Tokens not found should remain masked'

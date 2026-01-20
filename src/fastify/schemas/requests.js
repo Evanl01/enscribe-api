@@ -215,11 +215,7 @@ export const UnmaskPhiRequestBodySchema = z.object({
     .min(1, 'Text is required')
     .describe('Transcript with {{TYPE_ID}} tokens'),
   tokens: z.object({}).passthrough()
-    .refine(
-      (tokens) => Object.keys(tokens).length > 0,
-      { message: 'tokens object is required and must contain at least one token mapping' }
-    )
-    .describe('Token mapping from AWS Comprehend Medical (required)'),
+    .describe('Token mapping from AWS Comprehend Medical (can be empty)'),
 }).strict();
 
 /**

@@ -118,7 +118,15 @@ async function runAuthTests() {
         password: testAccount.password,
       },
       expectedStatus: 200,
-      expectedFields: ['user', 'token', 'token.access_token'],
+      expectedFields: ['user', 'token', 'token.access_token', 'tid'],
+      customValidator: (body) => {
+        const hasTid = body?.tid && typeof body.tid === 'string';
+        const tidFormat = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body?.tid);
+        return {
+          passed: hasTid && tidFormat,
+          message: hasTid && tidFormat ? 'tid is valid UUID' : `tid missing or invalid format. Got: ${body?.tid}`
+        };
+      },
     });
   } else {
     await runner.test('Sign-in with email and password (dummy - will fail)', {
@@ -351,7 +359,15 @@ async function runAuthTests() {
           password: testAccount.password,
         },
         expectedStatus: 200,
-        expectedFields: ['token.access_token', 'user.id', 'user.email'],
+        expectedFields: ['token.access_token', 'user.id', 'user.email', 'tid'],
+        customValidator: (body) => {
+          const hasTid = body?.tid && typeof body.tid === 'string';
+          const tidFormat = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body?.tid);
+          return {
+            passed: hasTid && tidFormat,
+            message: hasTid && tidFormat ? 'tid is valid UUID' : `tid missing or invalid format. Got: ${body?.tid}`
+          };
+        },
       });
 
       // Extract token from Test 15 response for Test 16
@@ -381,7 +397,211 @@ async function runAuthTests() {
     console.log('To enable: Add TEST_ACCOUNT_EMAIL and TEST_ACCOUNT_PASSWORD to .env.local\n');
   }
 
-  // Print results
+  // ===========================================
+  // NEW: Token Refresh and Cookie Status Tests
+  // ===========================================
+
+  if (hasTestAccounts()) {
+    const testAccount = getTestAccount('primary');
+    
+    if (testAccount && testAccount.email && testAccount.password) {
+      console.log(`\n✅ Testing token refresh and cookie status endpoints...\n`);
+
+      // First: Sign in to get refresh token cookie
+      let refreshTokenCookie = null;
+      let newAccessToken = null;
+
+      try {
+        const response = await fetch(`${runner.baseUrl}/api/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'sign-in',
+            email: testAccount.email,
+            password: testAccount.password,
+          }),
+        });
+
+        const signInData = await response.json();
+        const originalAccessToken = signInData?.token?.access_token;
+
+        // Extract refresh_token cookie from Set-Cookie header
+        const setCookieHeader = response.headers.get('set-cookie');
+        if (setCookieHeader) {
+          const match = setCookieHeader.match(/refresh_token=([^;]+)/);
+          if (match) {
+            refreshTokenCookie = match[1]; // Keep original encoding, don't decode
+          }
+        }
+
+        console.log(`  ℹ️  Extracted refresh token: ${refreshTokenCookie ? 'yes' : 'no'}`);
+        if (refreshTokenCookie) {
+          console.log(`  ℹ️  Cookie preview: ${refreshTokenCookie.slice(0, 50)}...`);
+        }
+        console.log();
+
+        // Test 21: POST /api/auth/refresh without cookie
+        await runner.test('POST /api/auth/refresh without token', {
+          method: 'POST',
+          endpoint: '/api/auth/refresh',
+          expectedStatus: 401,
+          expectedFields: ['error'],
+          customValidator: (body) => {
+            const hasError = body?.error && typeof body.error === 'string';
+            return {
+              passed: hasError,
+              message: body?.error || 'Should return error for missing refresh token'
+            };
+          },
+        });
+
+        // Test 22: POST /api/auth/refresh with invalid cookie
+        await runner.test('POST /api/auth/refresh with invalid token', {
+          method: 'POST',
+          endpoint: '/api/auth/refresh',
+          headers: {
+            'Cookie': 'refresh_token=invalid.jwt.here',
+          },
+          expectedStatus: 401,
+          expectedFields: ['error'],
+          customValidator: (body) => {
+            const hasError = body?.error && typeof body.error === 'string';
+            return {
+              passed: hasError,
+              message: body?.error || 'Should return error for invalid JWT'
+            };
+          },
+        });
+
+        // Test 23: GET /api/auth/cookie-status with valid cookie (BEFORE refresh to avoid token rotation)
+        if (refreshTokenCookie) {
+          await runner.test('GET /api/auth/cookie-status with valid cookie', {
+            method: 'GET',
+            endpoint: '/api/auth/cookie-status',
+            headers: {
+              'Cookie': `refresh_token=${refreshTokenCookie}`,
+            },
+            expectedStatus: 200,
+            expectedFields: ['cookiePresent'],
+            customValidator: (body) => {
+              return {
+                passed: body?.cookiePresent === true,
+                message: body?.cookiePresent === true ? 'Cookie correctly detected' : 'Should return cookiePresent: true'
+              };
+            },
+          });
+        }
+
+        // Test 24: GET /api/auth/cookie-status without cookie
+        await runner.test('GET /api/auth/cookie-status without cookie', {
+          method: 'GET',
+          endpoint: '/api/auth/cookie-status',
+          expectedStatus: 200,
+          expectedFields: ['cookiePresent'],
+          customValidator: (body) => {
+            return {
+              passed: body?.cookiePresent === false,
+              message: body?.cookiePresent === false ? 'No cookie correctly detected' : 'Should return cookiePresent: false'
+            };
+          },
+        });
+
+        // Test 25: GET /api/auth/cookie-status with invalid cookie
+        await runner.test('GET /api/auth/cookie-status with invalid cookie', {
+          method: 'GET',
+          endpoint: '/api/auth/cookie-status',
+          headers: {
+            'Cookie': 'refresh_token=invalid.jwt.here',
+          },
+          expectedStatus: 200,
+          expectedFields: ['cookiePresent'],
+          customValidator: (body) => {
+            return {
+              passed: body?.cookiePresent === false,
+              message: body?.cookiePresent === false ? 'Invalid cookie correctly detected' : 'Should return cookiePresent: false'
+            };
+          },
+        });
+
+        // ===== REFRESH TESTS RUN LAST (after cookie-status tests) =====
+        // Test 26: POST /api/auth/refresh with valid cookie (NOW RUN AFTER cookie tests)
+        if (refreshTokenCookie) {
+          await runner.test('POST /api/auth/refresh with valid token', {
+            method: 'POST',
+            endpoint: '/api/auth/refresh',
+            headers: {
+              'Cookie': `refresh_token=${refreshTokenCookie}`,
+            },
+            expectedStatus: 200,
+            expectedFields: ['accessToken'],
+            customValidator: (body) => {
+              const hasAccessToken = body?.accessToken && typeof body.accessToken === 'string';
+              const isDifferent = hasAccessToken && body.accessToken !== originalAccessToken;
+              newAccessToken = body?.accessToken;
+              return {
+                passed: hasAccessToken && isDifferent,
+                message: (hasAccessToken && isDifferent) 
+                  ? 'New accessToken returned (different from original)' 
+                  : (hasAccessToken && !isDifferent)
+                    ? 'ERROR: Got same token as original (should be new)'
+                    : 'No accessToken in response'
+              };
+            },
+          });
+        } else {
+          console.warn('  ⚠️  Could not extract refresh token, skipping refresh tests');
+        }
+
+        // Test 27: Verify token rotation - new RT from refresh should work
+        // This validates that refreshRefreshToken actually rotates the token in the DB
+        if (refreshTokenCookie) {
+          let newRefreshTokenCookie = null;
+
+          // First: refresh to get new tokens
+          const refreshResponse = await fetch(`${runner.baseUrl}/api/auth/refresh`, {
+            method: 'POST',
+            headers: {
+              'Cookie': `refresh_token=${refreshTokenCookie}`,
+            },
+          });
+
+          // Extract new refresh token from Set-Cookie header
+          if (refreshResponse.ok) {
+            const setCookieHeader = refreshResponse.headers.get('set-cookie');
+            if (setCookieHeader) {
+              const match = setCookieHeader.match(/refresh_token=([^;]+)/);
+              if (match) {
+                newRefreshTokenCookie = match[1]; // Keep original encoding, don't decode
+              }
+            }
+          }
+
+          // Test the new RT works on a second refresh call
+          if (newRefreshTokenCookie) {
+            await runner.test('POST /api/auth/refresh with rotated token (token rotation validation)', {
+              method: 'POST',
+              endpoint: '/api/auth/refresh',
+              headers: {
+                'Cookie': `refresh_token=${newRefreshTokenCookie}`,
+              },
+              expectedStatus: 200,
+              expectedFields: ['accessToken'],
+              customValidator: (body) => {
+                return {
+                  passed: body?.accessToken && typeof body.accessToken === 'string',
+                  message: body?.accessToken ? 'Rotated token works - RT properly stored in DB' : 'Rotated token should work after refresh'
+                };
+              },
+            });
+          } else {
+            console.warn('  ⚠️  Could not extract new token from refresh response, skipping rotation validation');
+          }
+        }
+      } catch (err) {
+        console.error('  ❌ Failed to extract tokens for refresh tests:', err.message);
+      }
+  }
+}
   runner.printResults();
 
   // Save results to file

@@ -9,6 +9,7 @@ dotenv.config({ path: envPath });
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookiePlugin from '@fastify/cookie';
 import pino from 'pino';
 import authenticationPlugin from './plugins/authentication.js';
 import { ALLOWED_ORIGINS_LIST } from './middleware/cors.js';
@@ -115,6 +116,9 @@ async function createFastifyApp(options = {}) {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     maxAge: 86400, // 24 hours
   });
+
+  // Register cookie parser plugin (makes fastify.parseCookie available)
+  await fastify.register(cookiePlugin);
 
   // Register authentication plugin (makes fastify.authenticate available)
   await fastify.register(authenticationPlugin);

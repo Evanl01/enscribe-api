@@ -71,20 +71,35 @@ async function authRoutes(fastify, opts) {
           }
 
           if (result.session) {
-            // User is logged in
-            const setCookie = authController.makeRefreshCookie(result.session.refresh_token);
+            // User is logged in - create wrapper JWT with tid
+            let wrapper = null;
+            if (result.tid) {
+              try {
+                wrapper = authController.createRefreshWrapper(result.user.id, result.tid);
+                console.log('[sign-up] Wrapper JWT created for tid:', result.tid);
+              } catch (err) {
+                console.error('[sign-up] Failed to create wrapper JWT:', err);
+              }
+            }
+            
+            const setCookie = wrapper ? authController.makeRefreshCookie(wrapper) : '';
+            
+            // Create safe session without refresh_token
+            const safeSession = { ...result.session };
+            delete safeSession.refresh_token;
+            
             if (isJsonClient(request)) {
-              reply.header('set-cookie', setCookie);
+              if (setCookie) reply.header('set-cookie', setCookie);
               return reply.status(201).send({
                 message: result.message,
                 user: result.user,
-                token: result.session,
+                token: safeSession,
               });
             } else {
-              reply.header('set-cookie', setCookie);
+              if (setCookie) reply.header('set-cookie', setCookie);
               return reply.status(201).send({
                 user: result.user,
-                token: result.session,
+                token: safeSession,
               });
             }
           } else {
@@ -108,7 +123,18 @@ async function authRoutes(fastify, opts) {
             return reply.status(401).send({ error: result.error });
           }
 
-          const setCookie = authController.makeRefreshCookie(result.session.refresh_token);
+          // Create wrapper JWT with tid for cookie
+          let wrapper = null;
+          if (result.tid) {
+            try {
+              wrapper = authController.createRefreshWrapper(result.user.id, result.tid);
+              console.log('[sign-in] Wrapper JWT created for tid:', result.tid);
+            } catch (err) {
+              console.error('[sign-in] Failed to create wrapper JWT:', err);
+            }
+          }
+          
+          const setCookie = wrapper ? authController.makeRefreshCookie(wrapper) : '';
           
           // Create safe session without refresh_token (matches legacy backend behavior)
           const safeSession = { ...result.session };
@@ -118,7 +144,7 @@ async function authRoutes(fastify, opts) {
           console.log('[sign-in] safeSession.access_token:', safeSession.access_token ? `${String(safeSession.access_token).slice(0, 50)}...` : 'MISSING');
           
           if (isJsonClient(request)) {
-            reply.header('set-cookie', setCookie);
+            if (setCookie) reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               message: 'Signed in successfully',
               user: result.user,
@@ -126,7 +152,7 @@ async function authRoutes(fastify, opts) {
               tid: result.tid,
             });
           } else {
-            reply.header('set-cookie', setCookie);
+            if (setCookie) reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               user: result.user,
               token: safeSession,
@@ -209,6 +235,84 @@ async function authRoutes(fastify, opts) {
     } catch (err) {
       console.error('[POST /auth] Error:', err);
       return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /auth/refresh
+   * Refreshes access token using refresh token from cookie
+   * Returns new access token with new wrapper JWT (token rotation)
+   */
+  fastify.post('/auth/refresh', async (request, reply) => {
+    try {
+      const wrapper = request.cookies.refresh_token || null;
+      
+      if (!wrapper) {
+        return reply.status(401).send({ error: 'No refresh token cookie found' });
+      }
+
+      console.log('[POST /auth/refresh] Attempting to refresh token');
+      const result = await authController.refreshRefreshToken(wrapper);
+
+      if (!result.success) {
+        // Clear invalid cookie
+        const clearCookie = authController.makeRefreshCookie('', { maxAge: 0 });
+        reply.header('set-cookie', clearCookie);
+        
+        return reply.status(401).send({ error: result.error });
+      }
+
+      // Success - create new wrapper JWT with new tid and return new access token
+      console.log('[POST /auth/refresh] Token refreshed and rotated successfully');
+      
+      // Extract user ID from access token for new wrapper JWT
+      let userId = null;
+      try {
+        const parts = result.accessToken.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+          userId = payload.sub || null;
+        }
+      } catch (e) {
+        console.warn('[POST /auth/refresh] Could not extract user ID from access token');
+      }
+
+      // Create new wrapper JWT with new tid
+      const newWrapper = authController.createRefreshWrapper(userId, result.newTokenId);
+      const cookie = authController.makeRefreshCookie(newWrapper);
+      reply.header('set-cookie', cookie);
+
+      return reply.status(200).send({
+        accessToken: result.accessToken,
+      });
+    } catch (err) {
+      console.error('[POST /auth/refresh] Error:', err);
+      return reply.status(500).send({ error: 'Failed to refresh token' });
+    }
+  });
+
+  /**
+   * GET /auth/cookie-status
+   * Checks if refresh token cookie is valid and present
+   * Used for detecting incognito/private browsing mode
+   */
+  fastify.get('/auth/cookie-status', async (request, reply) => {
+    try {
+      const wrapper = request.cookies.refresh_token || null;
+      
+      if (!wrapper) {
+        return reply.status(200).send({ cookiePresent: false });
+      }
+
+      console.log('[GET /auth/cookie-status] Checking cookie validity');
+      const result = await authController.checkRefreshCookieStatus(wrapper);
+
+      return reply.status(200).send({
+        cookiePresent: result.cookiePresent,
+      });
+    } catch (err) {
+      console.error('[GET /auth/cookie-status] Error:', err);
+      return reply.status(200).send({ cookiePresent: false });
     }
   });
 }

@@ -716,12 +716,35 @@ async function runPatientEncounterTests() {
   let testTranscriptId = null;
 
   if (testData) {
-    if (testData.encounters && testData.encounters.length > 0) {
+    // Find an encounter that has a linked transcript (created during setup)
+    // Setup creates transcripts for first 2 recordings, which are attached to first 2 encounters
+    if (testData.encounters && testData.transcripts && testData.encounters.length > 0) {
+      // Find first encounter that has a transcript linked to its recording
+      const encounterWithTranscript = testData.encounters.find(enc => 
+        enc.recording_id && testData.transcripts.some(t => t.recording_id === enc.recording_id)
+      );
+      
+      if (encounterWithTranscript) {
+        testEncounterId = encounterWithTranscript.id;
+        // Find the transcript for this encounter's recording
+        const linkedTranscript = testData.transcripts.find(t => t.recording_id === encounterWithTranscript.recording_id);
+        if (linkedTranscript) {
+          testTranscriptId = linkedTranscript.id;
+          console.log(`✓ Found encounter with linked transcript:`);
+          console.log(`  - Encounter ID: ${testEncounterId}`);
+          console.log(`  - Transcript ID: ${testTranscriptId}\n`);
+        }
+      } else if (testData.encounters.length > 0) {
+        // Fallback: use first encounter (may not have transcript)
+        testEncounterId = testData.encounters[0].id;
+        console.log(`✓ Found test encounter ID from testData.json: ${testEncounterId}`);
+      }
+    } else if (testData.encounters && testData.encounters.length > 0) {
       testEncounterId = testData.encounters[0].id;
       console.log(`✓ Found test encounter ID from testData.json: ${testEncounterId}`);
     }
     
-    if (testData.transcripts && testData.transcripts.length > 0) {
+    if (testData.transcripts && testData.transcripts.length > 0 && !testTranscriptId) {
       testTranscriptId = testData.transcripts[0].id;
       console.log(`✓ Found test transcript ID from testData.json: ${testTranscriptId}\n`);
     }

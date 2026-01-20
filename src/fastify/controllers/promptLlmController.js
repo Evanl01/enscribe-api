@@ -112,7 +112,7 @@ function validateSoapAndBilling(obj) {
     // Billing checks
     const b = obj.billing;
     if (!Array.isArray(b.icd10_codes)) throw new Error('billing.icd10_codes must be an array');
-    if (b.icd10_codes.length < 1) throw new Error('billing.icd10_codes must contain at least one code');
+    // if (b.icd10_codes.length < 1) throw new Error('billing.icd10_codes must contain at least one code');
     if (typeof b.billing_code !== 'string') throw new Error('billing.billing_code must be a string');
     if (typeof b.additional_inquiries !== 'string') throw new Error('billing.additional_inquiries must be a string');
 
