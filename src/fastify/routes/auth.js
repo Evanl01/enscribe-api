@@ -245,10 +245,25 @@ async function authRoutes(fastify, opts) {
    */
   fastify.post('/auth/refresh', async (request, reply) => {
     try {
+      fastify.log.info({
+        event: 'auth_refresh',
+        step: 'request_received',
+        availableCookies: Object.keys(request.cookies),
+        cookieCount: Object.keys(request.cookies).length,
+        rawCookieHeader: request.headers.cookie || 'NO_HEADER',
+      });
+
       const wrapper = request.cookies.refresh_token || null;
       
       if (!wrapper) {
-        console.log('[POST /auth/refresh] 401 - No refresh token cookie found');
+        fastify.log.error({
+          event: 'auth_refresh',
+          step: 'no_cookie',
+          error: 'No refresh token cookie found',
+          availableCookies: Object.keys(request.cookies),
+          allCookies: request.cookies,
+          cookieHeader: request.headers.cookie,
+        });
         return reply.status(401).send({ error: 'No refresh token cookie found' });
       }
 
@@ -265,22 +280,24 @@ async function authRoutes(fastify, opts) {
         // ignore
       }
 
-      console.log('[POST /auth/refresh] Starting refresh', {
+      fastify.log.info({
+        event: 'auth_refresh',
+        step: 'start',
         wrapperTid,
         wrapperLength: wrapper?.length || 0,
         wrapperPreview: wrapper ? wrapper.substring(0, 50) + '...' : 'null',
-        timestamp: new Date().toISOString(),
       });
 
-      const result = await authController.refreshRefreshToken(wrapper);
+      const result = await authController.refreshRefreshToken(wrapper, fastify.log);
 
       if (!result.success) {
-        console.log('[POST /auth/refresh] 401 - Refresh failed', {
+        fastify.log.error({
+          event: 'auth_refresh',
+          step: 'failed',
           error: result.error,
           wrapperTid,
           userId: result.debugUserId || 'unknown',
           oldTokenId: result.debugOldTokenId || 'unknown',
-          timestamp: new Date().toISOString(),
         });
         
         // Clear invalid cookie
@@ -291,8 +308,11 @@ async function authRoutes(fastify, opts) {
       }
 
       // Success - create new wrapper JWT with new tid and return new access token
-      console.log('[POST /auth/refresh] Token refreshed and rotated successfully');
-      
+      fastify.log.info({
+        event: 'auth_refresh',
+        step: 'success',
+        newTokenId: result.newTokenId,
+      });
       // Extract user ID from access token for new wrapper JWT
       let userId = null;
       try {
@@ -302,7 +322,11 @@ async function authRoutes(fastify, opts) {
           userId = payload.sub || null;
         }
       } catch (e) {
-        console.warn('[POST /auth/refresh] Could not extract user ID from access token');
+        fastify.log.warn({
+          event: 'auth_refresh',
+          step: 'warning',
+          message: 'Could not extract user ID from access token',
+        });
       }
 
       // Create new wrapper JWT with new tid
@@ -314,7 +338,11 @@ async function authRoutes(fastify, opts) {
         accessToken: result.accessToken,
       });
     } catch (err) {
-      console.error('[POST /auth/refresh] Error:', err);
+      fastify.log.error({
+        event: 'auth_refresh',
+        step: 'error',
+        error: err.message,
+      });
       return reply.status(500).send({ error: 'Failed to refresh token' });
     }
   });

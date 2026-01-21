@@ -168,6 +168,12 @@ export async function signIn(email, password) {
         const hashed = encryptionUtils.hashToken(refreshToken);
         const enc = encryptionUtils.encryptRefreshToken(refreshToken);
 
+        console.log('[signIn] Storing encrypted token', {
+          refreshTokenLength: refreshToken.length,
+          encryptedTokenLength: enc.length,
+          encryptedTokenPreview: enc.substring(0, 50),
+        });
+
         const { data: insertData, error: insertErr } = await admin
           .from(refreshTokensTable)
           .insert([
@@ -312,14 +318,17 @@ export async function resendConfirmationEmail(email, emailRedirectTo = null) {
  * Refresh a refresh token
  * Validates refresh token from cookie, checks inactivity, exchanges with Supabase
  * Updates token in DB and returns new access token
+ * @param {string} wrapper - The wrapper JWT from cookie
+ * @param {object} logger - Pino logger instance
  */
-export async function refreshRefreshToken(wrapper) {
+export async function refreshRefreshToken(wrapper, logger = null) {
   try {
+    const log = logger || { info: console.log, error: console.error, warn: console.warn };
     const REFRESH_INACTIVITY_LIMIT_SECONDS = Number(process.env.REFRESH_INACTIVITY_LIMIT_SECONDS || 3 * 24 * 3600);
     const secret = process.env.REFRESH_TOKEN_SIGNING_KEY_HEX;
 
     if (!secret) {
-      console.error('[refreshRefreshToken] REFRESH_TOKEN_SIGNING_KEY_HEX missing');
+      log.error({ event: 'refreshRefreshToken', step: 'config_error', error: 'REFRESH_TOKEN_SIGNING_KEY_HEX missing' });
       return { success: false, error: 'Server misconfigured' };
     }
 
@@ -343,7 +352,9 @@ export async function refreshRefreshToken(wrapper) {
       
       payload = JSON.parse(Buffer.from(p64, 'base64url').toString('utf8'));
     } catch (err) {
-      console.error('[refreshRefreshToken] Wrapper verification failed', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'wrapper_validation_failed',
         error: err.message,
         wrapperLength: wrapper?.length || 0,
         wrapperPreview: wrapper ? wrapper.substring(0, 50) + '...' : 'null',
@@ -353,20 +364,28 @@ export async function refreshRefreshToken(wrapper) {
 
     const { sub: userId, tid: oldTokenId, exp, iat } = payload;
     if (!userId || !oldTokenId) {
-      console.error('[refreshRefreshToken] Invalid payload', { userId, oldTokenId });
+      log.error({ event: 'refreshRefreshToken', step: 'invalid_payload', userId, oldTokenId });
       return { success: false, error: 'invalid_refresh_payload' };
     }
 
+    log.info({
+      event: 'refreshRefreshToken',
+      step: 'wrapper_validated',
+      tid: oldTokenId,
+      userId,
+      issuedAt: new Date(iat * 1000).toISOString(),
+      expiresAt: new Date(exp * 1000).toISOString(),
+    });
+
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (exp && nowSeconds > exp) {
-      const expiryTime = new Date(exp * 1000).toISOString();
-      const now = new Date(nowSeconds * 1000).toISOString();
-      console.log('[refreshRefreshToken] Wrapper JWT expired', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'wrapper_jwt_expired',
         tid: oldTokenId,
         userId,
         issuedAt: new Date(iat * 1000).toISOString(),
-        expiresAt: expiryTime,
-        now,
+        expiresAt: new Date(exp * 1000).toISOString(),
         expiredBySeconds: nowSeconds - exp,
       });
       return { success: false, error: 'refresh_expired', debugUserId: userId, debugOldTokenId: oldTokenId };
@@ -374,7 +393,7 @@ export async function refreshRefreshToken(wrapper) {
 
     // Lookup old token row in DB
     const admin = supabaseAdmin();
-    console.log('[refreshRefreshToken] Looking up token in DB', { tid: oldTokenId, userId });
+    log.info({ event: 'refreshRefreshToken', step: 'db_lookup', tid: oldTokenId, userId });
     
     const { data: oldRow, error: lookupErr } = await admin
       .from(refreshTokensTable)
@@ -384,7 +403,9 @@ export async function refreshRefreshToken(wrapper) {
       .maybeSingle();
 
     if (lookupErr) {
-      console.error('[refreshRefreshToken] DB lookup error', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'db_lookup_error',
         error: lookupErr.message,
         tid: oldTokenId,
         userId,
@@ -393,7 +414,9 @@ export async function refreshRefreshToken(wrapper) {
     }
 
     if (!oldRow) {
-      console.log('[refreshRefreshToken] Token not found in DB', {
+      log.info({
+        event: 'refreshRefreshToken',
+        step: 'token_not_found',
         tid: oldTokenId,
         userId,
         queryTime: new Date().toISOString(),
@@ -401,7 +424,9 @@ export async function refreshRefreshToken(wrapper) {
       return { success: false, error: 'token_revoked_or_notfound', debugUserId: userId, debugOldTokenId: oldTokenId };
     }
 
-    console.log('[refreshRefreshToken] Token found in DB', {
+    log.info({
+      event: 'refreshRefreshToken',
+      step: 'token_found',
       tid: oldTokenId,
       userId,
       revoked: oldRow.revoked,
@@ -409,10 +434,13 @@ export async function refreshRefreshToken(wrapper) {
       expiresAt: oldRow.expires_at,
       lastActivityAt: oldRow.last_activity_at,
       dbUserId: oldRow.user_id,
+      storedEncTokenLength: oldRow.token_enc?.length || 0,
     });
 
     if (oldRow.revoked) {
-      console.log('[refreshRefreshToken] Token is revoked', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'token_revoked',
         tid: oldTokenId,
         userId,
       });
@@ -421,7 +449,9 @@ export async function refreshRefreshToken(wrapper) {
 
     const expiresTime = new Date(oldRow.expires_at).getTime();
     if (expiresTime < Date.now()) {
-      console.log('[refreshRefreshToken] Token expired in DB', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'token_expired_in_db',
         tid: oldTokenId,
         userId,
         expiresAt: oldRow.expires_at,
@@ -438,7 +468,9 @@ export async function refreshRefreshToken(wrapper) {
     
     if (oldRow.last_activity_at && inactivityMs > inactivityLimitMs) {
       await admin.from(refreshTokensTable).update({ revoked: true }).eq('id', oldTokenId);
-      console.log('[refreshRefreshToken] Token revoked due to inactivity', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'inactivity_timeout',
         tid: oldTokenId,
         userId,
         lastActivityAt: oldRow.last_activity_at,
@@ -453,8 +485,17 @@ export async function refreshRefreshToken(wrapper) {
     let rawStoredRefresh;
     try {
       rawStoredRefresh = encryptionUtils.decryptRefreshToken(oldRow.token_enc);
+      log.info({
+        event: 'refreshRefreshToken',
+        step: 'decryption_success',
+        tid: oldTokenId,
+        userId,
+        decryptedTokenLength: rawStoredRefresh?.length || 0,
+      });
     } catch (err) {
-      console.error('[refreshRefreshToken] Decrypt failed', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'decryption_failed',
         error: err.message,
         tid: oldTokenId,
         userId,
@@ -466,7 +507,9 @@ export async function refreshRefreshToken(wrapper) {
 
     const hashOk = encryptionUtils.verifyTokenHash(rawStoredRefresh, oldRow.token_hash);
     if (!hashOk) {
-      console.error('[refreshRefreshToken] Hash verification failed', {
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'hash_verification_failed',
         tid: oldTokenId,
         userId,
         decryptedTokenLength: rawStoredRefresh?.length || 0,
@@ -474,6 +517,13 @@ export async function refreshRefreshToken(wrapper) {
       await admin.from(refreshTokensTable).update({ revoked: true }).eq('id', oldTokenId);
       return { success: false, error: 'invalid_refresh', debugUserId: userId, debugOldTokenId: oldTokenId };
     }
+
+    log.info({
+      event: 'refreshRefreshToken',
+      step: 'hash_verified',
+      tid: oldTokenId,
+      userId,
+    });
 
     // Exchange with Supabase
     try {
@@ -485,10 +535,11 @@ export async function refreshRefreshToken(wrapper) {
       }
 
       const url = `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`;
-      console.log('[refreshRefreshToken] Exchanging with Supabase', {
+      log.info({
+        event: 'refreshRefreshToken',
+        step: 'supabase_exchange_start',
         tid: oldTokenId,
         userId,
-        supabaseUrl,
         storedRefreshTokenLength: rawStoredRefresh?.length || 0,
       });
       
@@ -504,7 +555,9 @@ export async function refreshRefreshToken(wrapper) {
 
       if (!resp.ok) {
         const text = await resp.text().catch(() => '<no body>');
-        console.error('[refreshRefreshToken] Supabase exchange failed', {
+        log.error({
+          event: 'refreshRefreshToken',
+          step: 'supabase_exchange_failed',
           status: resp.status,
           statusText: resp.statusText,
           response: text?.substring(0, 200),
@@ -520,7 +573,9 @@ export async function refreshRefreshToken(wrapper) {
       const newRefreshToken = session.refresh_token;
 
       if (!accessToken) {
-        console.error('[refreshRefreshToken] No access token in Supabase response', {
+        log.error({
+          event: 'refreshRefreshToken',
+          step: 'no_access_token_from_supabase',
           tid: oldTokenId,
           userId,
           hasRefreshToken: !!newRefreshToken,
@@ -529,7 +584,9 @@ export async function refreshRefreshToken(wrapper) {
         return { success: false, error: 'no_access_token_from_supabase', debugUserId: userId, debugOldTokenId: oldTokenId };
       }
       
-      console.log('[refreshRefreshToken] Supabase exchange successful', {
+      log.info({
+        event: 'refreshRefreshToken',
+        step: 'supabase_exchange_success',
         tid: oldTokenId,
         userId,
         accessTokenLength: accessToken?.length || 0,
@@ -557,14 +614,25 @@ export async function refreshRefreshToken(wrapper) {
           }]);
 
         if (insertErr) {
-          console.error('[refreshRefreshToken] Failed to insert new token row:', insertErr);
+          log.error({
+            event: 'refreshRefreshToken',
+            step: 'token_rotation_insert_failed',
+            error: insertErr.message,
+            userId,
+          });
           return { success: false, error: 'token_rotation_failed' };
         }
 
         // Revoke old row for security
         await admin.from(refreshTokensTable).update({ revoked: true }).eq('id', oldTokenId);
 
-        console.log('[refreshRefreshToken] Token rotated: old tid revoked, new tid created', { oldTokenId, newTokenId });
+        log.info({
+          event: 'refreshRefreshToken',
+          step: 'token_rotated',
+          oldTokenId,
+          newTokenId,
+          userId,
+        });
 
         return {
           success: true,
@@ -572,15 +640,29 @@ export async function refreshRefreshToken(wrapper) {
           newTokenId, // Return new tid so route can create new wrapper JWT
         };
       } catch (err) {
-        console.error('[refreshRefreshToken] Failed to rotate token:', err);
+        log.error({
+          event: 'refreshRefreshToken',
+          step: 'token_rotation_failed',
+          error: err.message,
+          userId,
+        });
         return { success: false, error: 'token_rotation_failed' };
       }
     } catch (err) {
-      console.error('[refreshRefreshToken] Exchange error:', err.message);
+      log.error({
+        event: 'refreshRefreshToken',
+        step: 'supabase_exchange_error',
+        error: err.message,
+        userId: userId || 'unknown',
+      });
       return { success: false, error: 'refresh_error' };
     }
   } catch (err) {
-    console.error('[refreshRefreshToken] Unexpected error:', err);
+    log?.error?.({
+      event: 'refreshRefreshToken',
+      step: 'unexpected_error',
+      error: err.message,
+    });
     return { success: false, error: err.message };
   }
 }
