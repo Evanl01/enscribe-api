@@ -158,6 +158,19 @@ export async function signIn(email, password) {
 
     console.log('[signIn] Sign-in successful for user:', data.user.id);
 
+    // Log full session object for diagnostics
+    console.log('[signIn] Session object details', {
+      hasSession: !!data?.session,
+      sessionKeys: Object.keys(data?.session || {}),
+      hasRefreshToken: !!data?.session?.refresh_token,
+      refreshTokenLength: data?.session?.refresh_token?.length || 0,
+      refreshTokenType: typeof data?.session?.refresh_token,
+      refreshTokenPreview: data?.session?.refresh_token ? data.session.refresh_token.substring(0, 100) : 'null',
+      hasAccessToken: !!data?.session?.access_token,
+      accessTokenLength: data?.session?.access_token?.length || 0,
+      expiresIn: data?.session?.expires_in,
+    });
+
     // Persist refresh token server-side
     try {
       const admin = supabaseAdmin();
