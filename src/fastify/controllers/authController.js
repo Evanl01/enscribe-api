@@ -182,6 +182,8 @@ export async function signIn(email, password) {
         const enc = encryptionUtils.encryptRefreshToken(refreshToken);
 
         console.log('[signIn] Storing encrypted token', {
+          tid,
+          rawRefreshToken: refreshToken,
           refreshTokenLength: refreshToken.length,
           encryptedTokenLength: enc.length,
           encryptedTokenPreview: enc.substring(0, 50),
@@ -498,12 +500,20 @@ export async function refreshRefreshToken(wrapper, logger = null) {
     let rawStoredRefresh;
     try {
       rawStoredRefresh = encryptionUtils.decryptRefreshToken(oldRow.token_enc);
+      
+      // Create a hash of the decrypted token for comparison
+      const tokenHash = crypto.createHash('sha256').update(rawStoredRefresh).digest('hex');
+      const tokenPreview = rawStoredRefresh.substring(0, 50);
+      
       log.info({
         event: 'refreshRefreshToken',
         step: 'decryption_success',
         tid: oldTokenId,
         userId,
+        encryptedTokenLength: oldRow.token_enc?.length || 0,
         decryptedTokenLength: rawStoredRefresh?.length || 0,
+        decryptedTokenHash: tokenHash,
+        decryptedTokenPreview: tokenPreview,
       });
     } catch (err) {
       log.error({
@@ -541,27 +551,33 @@ export async function refreshRefreshToken(wrapper, logger = null) {
     // Exchange with Supabase
     try {
       const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
       
-      if (!supabaseUrl || !supabaseServiceKey) {
+      if (!supabaseUrl || !supabaseAnonKey) {
         throw new Error('Supabase not configured');
       }
 
       const url = `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`;
+      
+      // Log token details before sending to Supabase
+      const tokenToSendHash = crypto.createHash('sha256').update(rawStoredRefresh).digest('hex');
+      const tokenToSendPreview = rawStoredRefresh.substring(0, 50);
+      
       log.info({
         event: 'refreshRefreshToken',
         step: 'supabase_exchange_start',
         tid: oldTokenId,
         userId,
         storedRefreshTokenLength: rawStoredRefresh?.length || 0,
+        tokenToSendHash,
+        tokenToSendPreview,
       });
       
       const resp = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseServiceKey}`,
-          'apikey': supabaseServiceKey,
+          'apikey': supabaseAnonKey,
         },
         body: JSON.stringify({ refresh_token: rawStoredRefresh }),
       });
@@ -573,9 +589,13 @@ export async function refreshRefreshToken(wrapper, logger = null) {
           step: 'supabase_exchange_failed',
           status: resp.status,
           statusText: resp.statusText,
-          response: text?.substring(0, 200),
+          fullResponse: text,
           tid: oldTokenId,
           userId,
+          tokenToSendHash,
+          tokenToSendPreview,
+          storedEncTokenLength: oldRow.token_enc?.length || 0,
+          decryptedTokenLength: rawStoredRefresh?.length || 0,
         });
         await admin.from(refreshTokensTable).update({ revoked: true }).eq('id', oldTokenId);
         return { success: false, error: 'invalid_refresh_exchange', debugUserId: userId, debugOldTokenId: oldTokenId };

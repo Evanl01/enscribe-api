@@ -331,8 +331,30 @@ async function authRoutes(fastify, opts) {
 
       // Create new wrapper JWT with new tid
       const newWrapper = authController.createRefreshWrapper(userId, result.newTokenId);
-      const cookie = authController.makeRefreshCookie(newWrapper);
-      reply.header('set-cookie', cookie);
+      
+      // Set refresh token cookie using Fastify's setCookie method for proper cookie handling
+      const REFRESH_MAX_AGE_SECONDS = Number(process.env.REFRESH_MAX_AGE_SECONDS || 3 * 24 * 3600);
+      const REFRESH_COOKIE_SAMESITE = (process.env.REFRESH_COOKIE_SAMESITE || 'lax').toLowerCase();
+      const REFRESH_COOKIE_SECURE = process.env.REFRESH_COOKIE_SECURE
+        ? process.env.REFRESH_COOKIE_SECURE === 'true'
+        : process.env.NODE_ENV === 'production';
+      const REFRESH_COOKIE_DOMAIN = process.env.REFRESH_COOKIE_DOMAIN || undefined;
+      
+      reply.setCookie('refresh_token', newWrapper, {
+        httpOnly: true,
+        secure: REFRESH_COOKIE_SECURE,
+        sameSite: REFRESH_COOKIE_SAMESITE,
+        path: '/',
+        maxAge: REFRESH_MAX_AGE_SECONDS,
+        ...(REFRESH_COOKIE_DOMAIN && { domain: REFRESH_COOKIE_DOMAIN }),
+      });
+
+      fastify.log.info({
+        event: 'auth_refresh',
+        step: 'cookie_set',
+        newTokenId: result.newTokenId,
+        cookieMaxAge: REFRESH_MAX_AGE_SECONDS,
+      });
 
       return reply.status(200).send({
         accessToken: result.accessToken,
