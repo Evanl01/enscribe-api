@@ -45,48 +45,6 @@ jobs:
     permissions:
       contents: read
     
-    env:
-      # Supabase
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      # Fastify
-      FASTIFY_HOST: ${{ secrets.FASTIFY_HOST }}
-      FASTIFY_PORT: ${{ secrets.FASTIFY_PORT }}
-      # OpenAI
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_API_URL: ${{ secrets.OPENAI_API_URL }}
-      # Azure OpenAI
-      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-      AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
-      AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-      AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
-      # Google Cloud
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-      GCP_ZONE: ${{ secrets.GCP_ZONE }}
-      GCP_VM_INSTANCE_NAME: ${{ secrets.GCP_VM_INSTANCE_NAME }}
-      GCP_VM_RATE_LIMIT_MAX_CALLS: ${{ secrets.GCP_VM_RATE_LIMIT_MAX_CALLS }}
-      GCP_VM_RATE_LIMIT_WINDOW_SEC: ${{ secrets.GCP_VM_RATE_LIMIT_WINDOW_SEC }}
-      CLOUD_RUN_TRANSCRIBE_URL: ${{ secrets.CLOUD_RUN_TRANSCRIBE_URL }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_API_URL: ${{ secrets.GEMINI_API_URL }}
-      # AWS
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      # Encryption
-      RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
-      RSA_PUBLIC_KEY: ${{ secrets.RSA_PUBLIC_KEY }}
-      REFRESH_TOKEN_AES_KEY_HEX: ${{ secrets.REFRESH_TOKEN_AES_KEY_HEX }}
-      REFRESH_TOKEN_SIGNING_KEY_HEX: ${{ secrets.REFRESH_TOKEN_SIGNING_KEY_HEX }}
-      # Refresh Token Config
-      REFRESH_COOKIE_DOMAIN: ${{ secrets.REFRESH_COOKIE_DOMAIN }}
-      REFRESH_COOKIE_SAMESITE: ${{ secrets.REFRESH_COOKIE_SAMESITE }}
-      REFRESH_COOKIE_SECURE: ${{ secrets.REFRESH_COOKIE_SECURE }}
-      REFRESH_INACTIVITY_LIMIT_SECONDS: ${{ secrets.REFRESH_INACTIVITY_LIMIT_SECONDS }}
-      REFRESH_MAX_AGE_SECONDS: ${{ secrets.REFRESH_MAX_AGE_SECONDS }}
-      # Monitoring
-      CPU_THRESHOLD: ${{ secrets.CPU_THRESHOLD }}
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -97,46 +55,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACTIONS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_ACTIONS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
-      - name: Validate Required Secrets
-        run: |
-          # Check all required secrets are configured
-          required_vars=(
-            "SUPABASE_URL"
-            "SUPABASE_ANON_KEY"
-            "SUPABASE_SERVICE_ROLE_KEY"
-            "FASTIFY_PORT"
-            "OPENAI_API_KEY"
-            "OPENAI_API_URL"
-            "AZURE_OPENAI_ENDPOINT"
-            "AZURE_OPENAI_KEY"
-            "GCP_PROJECT_ID"
-            "GCP_SERVICE_ACCOUNT_KEY"
-            "GEMINI_API_KEY"
-            "AWS_REGION"
-            "RSA_PRIVATE_KEY"
-            "RSA_PUBLIC_KEY"
-            "REFRESH_TOKEN_AES_KEY_HEX"
-            "REFRESH_TOKEN_SIGNING_KEY_HEX"
-          )
-          
-          missing=()
-          for var in "${required_vars[@]}"; do
-            if [ -z "${!var}" ]; then
-              missing+=("$var")
-            fi
-          done
-          
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "❌ DEPLOYMENT FAILED: Missing required secrets"
-            echo "Add these to GitHub Settings > Secrets and variables > Actions:"
-            for var in "${missing[@]}"; do
-              echo "  - $var"
-            done
-            exit 1
-          fi
-          
-          echo "✅ All required secrets are configured"
 
       - name: Deploy via Systems Manager
         env:
@@ -179,38 +97,34 @@ jobs:
           ENV_START=$(date +%s)
           echo "Setting up environment variables..."
           cat > .env.local << 'ENVEOF'
-          SUPABASE_URL=${SUPABASE_URL}
-          SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-          SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FASTIFY_HOST=0.0.0.0
-          FASTIFY_PORT=${FASTIFY_PORT}
+          FASTIFY_PORT=${{ secrets.FASTIFY_PORT }}
           NODE_ENV=production
-          OPENAI_API_KEY=${OPENAI_API_KEY}
-          OPENAI_API_URL=${OPENAI_API_URL}
-          AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-          AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}
-          AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
-          AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT}
-          GCP_PROJECT_ID=${GCP_PROJECT_ID}
-          GCP_SERVICE_ACCOUNT_KEY=${GCP_SERVICE_ACCOUNT_KEY}
-          GEMINI_API_KEY=${GEMINI_API_KEY}
-          GEMINI_API_URL=${GEMINI_API_URL}
-          GCP_ZONE=${GCP_ZONE}
-          GCP_VM_INSTANCE_NAME=${GCP_VM_INSTANCE_NAME}
-          GCP_VM_RATE_LIMIT_MAX_CALLS=${GCP_VM_RATE_LIMIT_MAX_CALLS}
-          GCP_VM_RATE_LIMIT_WINDOW_SEC=${GCP_VM_RATE_LIMIT_WINDOW_SEC}
-          CLOUD_RUN_TRANSCRIBE_URL=${CLOUD_RUN_TRANSCRIBE_URL}
-          AWS_REGION=${AWS_REGION}
-          AWS_COMPREHEND_ACCESS_KEY_ID=${AWS_COMPREHEND_ACCESS_KEY_ID}
-          AWS_COMPREHEND_SECRET_ACCESS_KEY=${AWS_COMPREHEND_SECRET_ACCESS_KEY}
-          REFRESH_TOKEN_AES_KEY_HEX=${REFRESH_TOKEN_AES_KEY_HEX}
-          REFRESH_TOKEN_SIGNING_KEY_HEX=${REFRESH_TOKEN_SIGNING_KEY_HEX}
-          REFRESH_COOKIE_DOMAIN=${REFRESH_COOKIE_DOMAIN}
-          REFRESH_COOKIE_SAMESITE=${REFRESH_COOKIE_SAMESITE}
-          REFRESH_COOKIE_SECURE=${REFRESH_COOKIE_SECURE}
-          REFRESH_INACTIVITY_LIMIT_SECONDS=${REFRESH_INACTIVITY_LIMIT_SECONDS}
-          REFRESH_MAX_AGE_SECONDS=${REFRESH_MAX_AGE_SECONDS}
-          CPU_THRESHOLD=${CPU_THRESHOLD}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_URL=${{ secrets.OPENAI_API_URL }}
+          GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          GCP_SERVICE_ACCOUNT_KEY=${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_URL=${{ secrets.GEMINI_API_URL }}
+          GCP_ZONE=${{ secrets.GCP_ZONE }}
+          GCP_VM_INSTANCE_NAME=${{ secrets.GCP_VM_INSTANCE_NAME }}
+          GCP_VM_RATE_LIMIT_MAX_CALLS=${{ secrets.GCP_VM_RATE_LIMIT_MAX_CALLS }}
+          GCP_VM_RATE_LIMIT_WINDOW_SEC=${{ secrets.GCP_VM_RATE_LIMIT_WINDOW_SEC }}
+          CLOUD_RUN_TRANSCRIBE_URL=${{ secrets.CLOUD_RUN_TRANSCRIBE_URL }}
+          AWS_REGION=${{ secrets.AWS_REGION }}
+          RSA_PRIVATE_KEY=${{ secrets.RSA_PRIVATE_KEY }}
+          RSA_PUBLIC_KEY=${{ secrets.RSA_PUBLIC_KEY }}
+          REFRESH_TOKEN_AES_KEY_HEX=${{ secrets.REFRESH_TOKEN_AES_KEY_HEX }}
+          REFRESH_TOKEN_SIGNING_KEY_HEX=${{ secrets.REFRESH_TOKEN_SIGNING_KEY_HEX }}
+          REFRESH_COOKIE_DOMAIN=${{ secrets.REFRESH_COOKIE_DOMAIN }}
+          REFRESH_COOKIE_SAMESITE=${{ secrets.REFRESH_COOKIE_SAMESITE }}
+          REFRESH_COOKIE_SECURE=${{ secrets.REFRESH_COOKIE_SECURE }}
+          REFRESH_INACTIVITY_LIMIT_SECONDS=${{ secrets.REFRESH_INACTIVITY_LIMIT_SECONDS }}
+          REFRESH_MAX_AGE_SECONDS=${{ secrets.REFRESH_MAX_AGE_SECONDS }}
+          CPU_THRESHOLD=${{ secrets.CPU_THRESHOLD }}
           ENVEOF
           ENV_END=$(date +%s)
           echo "✓ Environment variables set in $((ENV_END - ENV_START))s"
