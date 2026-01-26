@@ -100,8 +100,7 @@ export function unmask_phi(maskedText, tokens) {
   // Count masked tokens in input
   const maskedTokenPattern = /\{\{([^}]+)\}\}/g;
   const maskedTokensInText = maskedText.match(maskedTokenPattern) || [];
-  console.log('[unmask_phi] Masked tokens found in input:', maskedTokensInText.length);
-  console.log('[unmask_phi] Masked tokens:', maskedTokensInText);
+  console.log('[unmask_phi] Masked tokens found in input:', maskedTokensInText);
   
   let unmaskedCount = 0;
   let missingTokenCount = 0;
@@ -109,10 +108,14 @@ export function unmask_phi(maskedText, tokens) {
   const unmasked = maskedText.replace(/\{\{([^}]+)\}\}/g, (match, inner) => {
     const replacement = tokens[inner];
     
-    if (replacement === undefined) {
+    if (!tokens.hasOwnProperty(inner)) {
+      console.error('[unmask_phi] PHI token undefined:', match);
+      missingTokenCount++;
+      return match;
+    } else if (!replacement) {
       console.error('[unmask_phi] PHI token missing from tokens dict:', match);
       missingTokenCount++;
-      return match; // leave unchanged if not found
+      return match;
     }
 
     unmaskedCount++;

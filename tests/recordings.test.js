@@ -50,6 +50,23 @@ function loadTestData() {
 }
 
 /**
+ * Helper: Decode JWT token to extract user ID
+ */
+function decodeJWT(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    
+    // Decode the payload (second part)
+    const decoded = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    return decoded;
+  } catch (error) {
+    console.error('Error decoding JWT:', error.message);
+    return null;
+  }
+}
+
+/**
  * Helper: Validate that array is sorted by field in correct order
  */
 function isSortedCorrectly(items, field, ascending = true) {
@@ -563,10 +580,10 @@ async function runRecordingsCrudTests() {
     if (validRecordings.length > 0) {
       // Use the last valid recording for deletion to not affect other tests
       const recordingId = validRecordings[validRecordings.length - 1].id;
-      const result = await runner.test('DELETE /api/recordings/:id - delete recording', {
+      const result = await runner.test('DELETE /api/recordings/complete/:id - delete recording', {
         testNumber: 20,
         method: 'DELETE',
-        endpoint: `/api/recordings/${recordingId}`,
+        endpoint: `/api/recordings/complete/${recordingId}`,
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -581,10 +598,10 @@ async function runRecordingsCrudTests() {
 
   // Test 21: Delete non-existent recording
   if (accessToken) {
-    await runner.test('DELETE /api/recordings/:id - not found', {
+    await runner.test('DELETE /api/recordings/complete/:id - not found', {
       testNumber: 21,
       method: 'DELETE',
-      endpoint: '/api/recordings/99999',
+      endpoint: '/api/recordings/complete/99999',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -603,6 +620,518 @@ async function runRecordingsCrudTests() {
   return runner.getSummary();
 }
 
+/**
+ * Run tests for POST /api/recordings/create-signed-upload-url endpoint
+ * Tests signed URL generation, collision detection, extension validation
+ */
+async function runRecordingsUploadTests() {
+  testData = loadTestData();
+
+  console.log('Starting Recordings Upload Endpoint tests...');
+  console.log(`Server: ${runner.baseUrl}\n`);
+
+  // Get valid access token from test account
+  let accessToken = null;
+  let userId = null;
+
+  if (hasTestAccounts()) {
+    const testAccount = getTestAccount('primary');
+    if (testAccount && testAccount.email && testAccount.password) {
+      const signInResponse = await fetch(`${runner.baseUrl}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sign-in',
+          email: testAccount.email,
+          password: testAccount.password,
+        }),
+      });
+
+      if (signInResponse.ok) {
+        const authData = await signInResponse.json();
+        accessToken = authData.token.access_token;
+        
+        // Decode JWT to extract user ID
+        const decoded = decodeJWT(accessToken);
+        userId = decoded?.sub;
+        
+        console.log('✓ Obtained valid access token from test account');
+        console.log(`✓ Extracted user ID: ${userId}\n`);
+      } else {
+        console.log('⚠️ Could not obtain access token from test account');
+      }
+    }
+  }
+
+  // Test 22: POST /api/recordings/create-signed-upload-url without auth
+  await runner.test('POST /api/recordings/create-signed-upload-url without auth', {
+    testNumber: 22,
+    method: 'POST',
+    endpoint: '/api/recordings/create-signed-upload-url',
+    expectedStatus: 401,
+    expectedFields: ['error'],
+  });
+
+  // Test 23: POST /api/recordings/create-signed-upload-url with invalid token
+  await runner.test('POST /api/recordings/create-signed-upload-url with invalid token', {
+    testNumber: 23,
+    method: 'POST',
+    endpoint: '/api/recordings/create-signed-upload-url',
+    headers: {
+      Authorization: `Bearer ${MOCK_TOKEN}`,
+    },
+    body: { filename: `${userId || 'test-id'}/test.mp3` },
+    expectedStatus: 401,
+  });
+
+  // Test 24: POST /api/recordings/create-signed-upload-url missing filename (Zod validation)
+  if (accessToken) {
+    await runner.test('POST /api/recordings/create-signed-upload-url missing filename', {
+      testNumber: 24,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-upload-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: {},
+      expectedStatus: 400,
+      customValidator: (body) => {
+        // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+        const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+        const hasFilenameIssue = /filename/.test(JSON.stringify(body?.error));
+        
+        return {
+          passed: isZodError && hasFilenameIssue,
+          message: (isZodError && hasFilenameIssue)
+            ? 'Should return ZodError for missing filename'
+            : `Expected ZodError for missing filename. Got: ${JSON.stringify(body?.error)}`
+        };
+      },
+    });
+  }
+
+  // Test 25: POST /api/recordings/create-signed-upload-url filename without extension (Business logic validation)
+  if (accessToken && userId) {
+    await runner.test('POST /api/recordings/create-signed-upload-url filename without extension', {
+      testNumber: 25,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-upload-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: `${userId}/test-no-ext` },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+    });
+  }
+
+  // Test 26: POST /api/recordings/create-signed-upload-url invalid extension (.txt) (Business logic validation)
+  if (accessToken && userId) {
+    await runner.test('POST /api/recordings/create-signed-upload-url invalid extension (.txt)', {
+      testNumber: 26,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-upload-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: `${userId}/test.txt` },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+    });
+  }
+
+  // Test 27: POST /api/recordings/create-signed-upload-url valid .webm extension
+  let signedUrl = null;
+  let uploadPath = null;
+  if (accessToken && userId) {
+    const result = await runner.test('POST /api/recordings/create-signed-upload-url valid .webm file', {
+      testNumber: 27,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-upload-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: `${userId}/test-record-1705945678-42.webm` },
+      expectedStatus: 200,
+      expectedFields: ['success', 'signedUrl', 'path', 'filename', 'expiresAt'],
+    });
+
+    if (result.passed && result.body) {
+      signedUrl = result.body.signedUrl;
+      uploadPath = result.body.path;
+      
+      // Validate signed URL format
+      if (typeof signedUrl === 'string' && signedUrl.length > 0 && signedUrl.includes('https')) {
+        console.log(`    ✓ Signed URL is valid HTTPS URL`);
+      } else {
+        console.log(`    ✗ Signed URL format invalid`);
+        result.passed = false;
+      }
+
+      // Validate path structure (should be userid/filename)
+      if (typeof uploadPath === 'string' && uploadPath.includes('/') && uploadPath.includes('test-record-1705945678-42.webm')) {
+        console.log(`    ✓ Path structure valid: ${uploadPath}`);
+      } else {
+        console.log(`    ✗ Path structure invalid: ${uploadPath}`);
+        result.passed = false;
+      }
+
+      // Validate expiration
+      if (result.body.expiresAt === 3600) {
+        console.log(`    ✓ Expiration is 3600 seconds`);
+      } else {
+        console.log(`    ✗ Expiration incorrect: ${result.body.expiresAt}`);
+        result.passed = false;
+      }
+    }
+  }
+
+  // Test 28: POST /api/recordings/create-signed-upload-url valid .mp3 extension
+  if (accessToken && userId) {
+    await runner.test('POST /api/recordings/create-signed-upload-url valid .mp3 file', {
+      testNumber: 28,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-upload-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: `${userId}/audio-recording-1705945700-99.mp3` },
+      expectedStatus: 200,
+      expectedFields: ['success', 'signedUrl', 'path'],
+    });
+  }
+
+  // Test 29: Verify signed URL format is correct (string format validation only, no request)
+  if (signedUrl) {
+    const isValidSignedUrl = 
+      signedUrl.includes('https://') &&
+      signedUrl.includes('/storage/v1/object/upload/sign/') &&
+      signedUrl.includes('?token=') &&
+      signedUrl.includes('.supabase.co');
+    
+    // Register Test 29 as a proper test (format validation, no HTTP request)
+    const formatTest = {
+      name: 'POST /api/recordings/upload verify signed URL format',
+      passed: isValidSignedUrl,
+      endpoint: 'N/A (format validation only)',
+      method: 'N/A',
+      status: 200,
+      expectedStatus: 200,
+      body: { format: isValidSignedUrl ? 'valid' : 'invalid', urlSample: signedUrl.substring(0, 100) },
+      customMessage: isValidSignedUrl 
+        ? `Signed URL format valid (upload/sign pattern)`
+        : `Signed URL format invalid`,
+      testNumber: 29,
+      timestamp: new Date().toISOString(),
+    };
+    
+    runner.results.push(formatTest);
+    
+    if (isValidSignedUrl) {
+      console.log(`    ✓ Signed URL format is valid (upload/sign pattern)`);
+      console.log(`      URL structure: ${signedUrl.substring(0, 120)}...`);
+    } else {
+      console.log(`    ✗ Signed URL format is invalid`);
+    }
+  }
+
+  // Test 30: Collision detection - use existing recording from testData
+  // Use first recording (id: 1102): "Dr Tung 2025-07-17 3PM.mp4"
+  if (accessToken && userId) {
+    const existingFilename = `${userId}/Dr Tung 2025-07-17 3PM.mp4`;
+    
+    // First request - try to upload with existing filename
+    const result1 = await runner.test('POST /api/recordings/upload collision detection - first request (existing file)', {
+      testNumber: 30,
+      method: 'POST',
+      endpoint: '/api/recordings/upload',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: existingFilename },
+      expectedStatus: 200,
+      expectedFields: ['success', 'path', 'signedUrl'],
+    });
+
+    const firstPath = result1?.body?.path;
+
+    // Second request with same existing filename (should trigger collision handling)
+    const result2 = await runner.test('POST /api/recordings/upload collision detection - second request (should detect collision)', {
+      testNumber: 30.5,
+      method: 'POST',
+      endpoint: '/api/recordings/upload',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { filename: existingFilename },
+      expectedStatus: 200,
+      expectedFields: ['success', 'path', 'signedUrl'],
+    });
+
+    const secondPath = result2?.body?.path;
+
+    // Validate that paths are different (collision detection worked)
+    if (result1.passed && result2.passed && firstPath && secondPath) {
+      if (firstPath !== secondPath) {
+        console.log(`    ✓ Collision detection working:`);
+        console.log(`      Request 1: ${firstPath}`);
+        console.log(`      Request 2: ${secondPath} (collision detected, suffix added)`);
+      } else {
+        console.log(`    ✗ Collision detection failed: identical paths returned`);
+        result2.passed = false;
+      }
+    }
+  }
+
+  // Test 31-36: Validate all supported extensions
+  const supportedExtensions = ['mp3', 'wav', 'webm', 'ogg', 'm4a', 'mp4'];
+  const extensionResults = {};
+
+  if (accessToken && userId) {
+    let testNumOffset = 31;
+    for (const ext of supportedExtensions) {
+      const result = await runner.test(`POST /api/recordings/upload .${ext} extension`, {
+        testNumber: testNumOffset,
+        method: 'POST',
+        endpoint: '/api/recordings/upload',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: { filename: `${userId}/test-${ext}-1705945800-11.${ext}` },
+        expectedStatus: 200,
+        expectedFields: ['success', 'signedUrl', 'path'],
+      });
+      
+      extensionResults[ext] = result.passed;
+      testNumOffset++;
+    }
+
+    // Print extension validation summary
+    console.log(`\n  Extension Validation Results:`);
+    let allExtValid = true;
+    for (const ext of supportedExtensions) {
+      const status = extensionResults[ext] ? '✓' : '✗';
+      console.log(`    ${status} .${ext}`);
+      if (!extensionResults[ext]) allExtValid = false;
+    }
+    if (allExtValid) {
+      console.log(`    ✓ All ${supportedExtensions.length} supported extensions validated`);
+    }
+  }
+
+  // Test 37: POST /api/recordings/create-signed-url without auth
+  await runner.test('POST /api/recordings/create-signed-url without auth', {
+    testNumber: 37,
+    method: 'POST',
+    endpoint: '/api/recordings/create-signed-url',
+    body: { path: '08ab02d7-7a93-4c9f-8a48-bab1cb34803e/test-file.mp4' },
+    expectedStatus: 401,
+    expectedFields: ['error'],
+  });
+
+  // Test 38: POST /api/recordings/create-signed-url with invalid token
+  await runner.test('POST /api/recordings/create-signed-url with invalid token', {
+    testNumber: 38,
+    method: 'POST',
+    endpoint: '/api/recordings/create-signed-url',
+    headers: {
+      Authorization: `Bearer ${MOCK_TOKEN}`,
+    },
+    body: { path: '08ab02d7-7a93-4c9f-8a48-bab1cb34803e/test-file.mp4' },
+    expectedStatus: 401,
+  });
+
+  // Test 39: POST /api/recordings/create-signed-url missing path (Zod validation)
+  if (accessToken) {
+    await runner.test('POST /api/recordings/create-signed-url missing path', {
+      testNumber: 39,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: {},
+      expectedStatus: 400,
+      customValidator: (body) => {
+        // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+        const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+        const hasPathIssue = /path/.test(JSON.stringify(body?.error));
+        
+        return {
+          passed: isZodError && hasPathIssue,
+          message: (isZodError && hasPathIssue)
+            ? 'Should return ZodError for missing path'
+            : `Expected ZodError for missing path. Got: ${JSON.stringify(body?.error)}`
+        };
+      },
+    });
+  }
+
+  // Test 40: POST /api/recordings/create-signed-url invalid path format (single part, no slash)
+  if (accessToken) {
+    await runner.test('POST /api/recordings/create-signed-url invalid path format (no slash)', {
+      testNumber: 40,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { path: 'filename-only-no-uuid' },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+    });
+  }
+
+  // Test 41: POST /api/recordings/create-signed-url invalid path format (too many parts)
+  if (accessToken) {
+    await runner.test('POST /api/recordings/create-signed-url invalid path format (too many slashes)', {
+      testNumber: 41,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { path: 'uuid/folder/filename.mp4' },
+      expectedStatus: 400,
+      expectedFields: ['error'],
+    });
+  }
+
+  // Test 42: POST /api/recordings/create-signed-url path ownership check - wrong user UUID → 403
+  if (accessToken) {
+    const wrongUserUUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+    await runner.test('POST /api/recordings/create-signed-url access denied (wrong user UUID)', {
+      testNumber: 42,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { path: `${wrongUserUUID}/some-recording.mp4` },
+      expectedStatus: 403,
+      expectedFields: ['error'],
+    });
+  }
+
+  // Test 43: POST /api/recordings/create-signed-url valid path with correct owner → 200
+  let createSignedUrlResponse = null;
+  let testRecordingPath = null;
+  if (accessToken && testData.recordings && testData.recordings.length > 0) {
+    // Use first recording by ID from testData (recording with id: 1013)
+    const recordingsByIdAsc = testData.recordings
+      .filter(r => r.id !== null)
+      .sort((a, b) => a.id - b.id);
+    
+    const firstRecording = recordingsByIdAsc[0];
+    testRecordingPath = firstRecording.path;
+
+    const result = await runner.test('POST /api/recordings/create-signed-url valid request (real test data)', {
+      testNumber: 43,
+      method: 'POST',
+      endpoint: '/api/recordings/create-signed-url',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { path: testRecordingPath },
+      expectedStatus: 200,
+      expectedFields: ['signedUrl', 'expiresIn'],
+    });
+
+    if (result.passed && result.body) {
+      createSignedUrlResponse = result.body;
+      
+      // Validate signed URL format
+      const signedUrl = result.body.signedUrl;
+      if (typeof signedUrl === 'string' && signedUrl.length > 0 && signedUrl.includes('https')) {
+        console.log(`    ✓ Signed URL is valid HTTPS URL`);
+      } else {
+        console.log(`    ✗ Signed URL format invalid`);
+        result.passed = false;
+      }
+
+      // Validate expiry time
+      if (result.body.expiresIn === 3600) {
+        console.log(`    ✓ Expiration is 3600 seconds (1 hour)`);
+      } else {
+        console.log(`    ✗ Expiration incorrect: ${result.body.expiresIn}`);
+        result.passed = false;
+      }
+
+      // Validate URL contains expected components for download signed URL
+      if (signedUrl.includes('/storage/v1/object/sign/')) {
+        console.log(`    ✓ Signed URL has correct Supabase storage format for downloads`);
+      } else {
+        console.log(`    ✗ Signed URL format doesn't match Supabase storage pattern`);
+        result.passed = false;
+      }
+    }
+  }
+
+  // Test 44: HEAD request to signed URL - fetch metadata only (no file download)
+  if (createSignedUrlResponse && createSignedUrlResponse.signedUrl) {
+    const signedUrl = createSignedUrlResponse.signedUrl;
+    let metadataTest = {
+      name: 'HEAD signed URL metadata (no download)',
+      passed: false,
+      endpoint: signedUrl,
+      method: 'HEAD',
+      status: null,
+      expectedStatus: 200,
+      customMessage: '',
+      testNumber: 44,
+      timestamp: new Date().toISOString(),
+    };
+    
+    try {
+      const headResponse = await fetch(signedUrl, { method: 'HEAD' });
+      metadataTest.status = headResponse.status;
+      metadataTest.passed = headResponse.ok || headResponse.status === 404;
+      
+      if (headResponse.ok) {
+        console.log(`    ✓ HEAD request successful (${headResponse.status}) - metadata fetched, no file download`);
+        
+        // Extract all relevant metadata headers
+        const contentType = headResponse.headers.get('content-type');
+        const contentLength = headResponse.headers.get('content-length');
+        const cacheControl = headResponse.headers.get('cache-control');
+        const lastModified = headResponse.headers.get('last-modified');
+        const etag = headResponse.headers.get('etag');
+        const acceptRanges = headResponse.headers.get('accept-ranges');
+        
+        if (contentType) console.log(`      Content-Type: ${contentType}`);
+        if (contentLength) console.log(`      Content-Length: ${contentLength} bytes`);
+        if (lastModified) console.log(`      Last-Modified: ${lastModified}`);
+        if (etag) console.log(`      ETag: ${etag}`);
+        if (acceptRanges) console.log(`      Accept-Ranges: ${acceptRanges}`);
+        if (cacheControl) console.log(`      Cache-Control: ${cacheControl}`);
+        
+        metadataTest.customMessage = `HEAD request returned ${headResponse.status}, all metadata accessible without download`;
+      } else if (headResponse.status === 404) {
+        console.log(`    ⚠️ HEAD request returned 404 - file not in storage, but signed URL is valid`);
+        metadataTest.customMessage = `HEAD returned 404, URL format valid but file missing`;
+      } else {
+        console.log(`    ✗ HEAD request failed with status ${headResponse.status}`);
+        metadataTest.customMessage = `HEAD request failed: ${headResponse.status}`;
+      }
+    } catch (error) {
+      console.log(`    ✗ Error making HEAD request: ${error.message}`);
+      metadataTest.customMessage = `HEAD request error: ${error.message}`;
+    }
+    
+    runner.results.push(metadataTest);
+  }
+
+  // Summary
+  runner.printResults(44);
+  
+  // Save results to file
+  const resultsFile = runner.saveResults('recordings-tests.json');
+  console.log(`✅ Test results saved to: ${resultsFile}\n`);
+  
+  // Return summary for master test runner
+  return runner.getSummary();
+}
+
 // Run tests if this is the main module
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
@@ -612,16 +1141,26 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         await runRecordingsTests();
       } else if (args.includes('--crud')) {
         await runRecordingsCrudTests();
+      } else if (args.includes('--upload')) {
+        await runRecordingsUploadTests();
+      } else if (args.includes('--delete-storage')) {
+        await runRecordingsDeleteStorageTests();
       } else if (args.includes('--all')) {
         await runRecordingsTests();
         console.log('\n\n=== PART 2: CRUD TESTS ===\n');
         await runRecordingsCrudTests();
+        console.log('\n\n=== PART 3: UPLOAD ENDPOINT TESTS ===\n');
+        await runRecordingsUploadTests();
+        console.log('\n\n=== PART 4: DELETE STORAGE ENDPOINT TESTS ===\n');
+        await runRecordingsDeleteStorageTests();
       } else {
         console.log('Recording API Tests\n');
-        console.log('Usage: node recordings.test.js [--attachments] [--crud] [--all]');
-        console.log('  --attachments: Run GET /api/recordings/attachments tests (17 tests)');
-        console.log('  --crud:        Run CRUD tests (get by ID, not found, delete)');
-        console.log('  --all:         Run all tests (attachments + CRUD = 20 tests)');
+        console.log('Usage: node recordings.test.js [--attachments] [--crud] [--upload] [--delete-storage] [--all]');
+        console.log('  --attachments:    Run GET /api/recordings/attachments tests (17 tests)');
+        console.log('  --crud:           Run CRUD tests (get by ID, not found, delete)');
+        console.log('  --upload:         Run POST /api/recordings/upload tests (9 test groups)');
+        console.log('  --delete-storage: Run DELETE /api/recordings/storage tests (bulk delete)');
+        console.log('  --all:            Run all tests (attachments + CRUD + upload + delete-storage)');
       }
     } catch (error) {
       console.error('Test error:', error);
@@ -630,4 +1169,256 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   })();
 }
 
-export { runRecordingsTests, runRecordingsCrudTests };
+/**
+ * Run tests for DELETE /api/recordings/storage endpoint
+ * Tests bulk storage file deletion with various validation scenarios
+ */
+async function runRecordingsDeleteStorageTests() {
+  testData = loadTestData();
+
+  console.log('Starting Recordings Delete Storage Endpoint tests...');
+  console.log(`Server: ${runner.baseUrl}\n`);
+
+  // Get valid access token from test account
+  let accessToken = null;
+  let userId = null;
+
+  if (hasTestAccounts()) {
+    const testAccount = getTestAccount('primary');
+    if (testAccount && testAccount.email && testAccount.password) {
+      const signInResponse = await fetch(`${runner.baseUrl}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sign-in',
+          email: testAccount.email,
+          password: testAccount.password,
+        }),
+      });
+
+      if (signInResponse.ok) {
+        const authData = await signInResponse.json();
+        accessToken = authData.token.access_token;
+        
+        // Decode JWT to extract user ID
+        const decoded = decodeJWT(accessToken);
+        userId = decoded?.sub;
+        
+        console.log('✓ Obtained valid access token from test account');
+        console.log(`✓ Extracted user ID: ${userId}\n`);
+      } else {
+        console.log('⚠️ Could not obtain access token from test account');
+      }
+    }
+  }
+
+  // Test 45: DELETE /api/recordings/storage without auth
+  await runner.test('DELETE /api/recordings/storage without auth', {
+    testNumber: 45,
+    method: 'DELETE',
+    endpoint: '/api/recordings/storage',
+    body: { prefixes: ['test/file.mp3'] },
+    expectedStatus: 401,
+    expectedFields: ['error'],
+  });
+
+  // Test 46: DELETE /api/recordings/storage with invalid token
+  await runner.test('DELETE /api/recordings/storage with invalid token', {
+    testNumber: 46,
+    method: 'DELETE',
+    endpoint: '/api/recordings/storage',
+    headers: {
+      Authorization: `Bearer ${MOCK_TOKEN}`,
+    },
+    body: { prefixes: ['test/file.mp3'] },
+    expectedStatus: 401,
+  });
+
+  // Test 47: DELETE /api/recordings/storage missing prefixes (Zod validation)
+  if (accessToken) {
+    await runner.test('DELETE /api/recordings/storage missing prefixes', {
+      testNumber: 47,
+      method: 'DELETE',
+      endpoint: '/api/recordings/storage',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: {},
+      expectedStatus: 400,
+      customValidator: (body) => {
+        const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+        const hasPrefixesIssue = /prefixes/.test(JSON.stringify(body?.error));
+        
+        return {
+          passed: isZodError && hasPrefixesIssue,
+          message: (isZodError && hasPrefixesIssue)
+            ? 'Should return ZodError for missing prefixes'
+            : `Expected ZodError for missing prefixes. Got: ${JSON.stringify(body?.error)}`
+        };
+      },
+    });
+  }
+
+  // Test 48: DELETE /api/recordings/storage with empty prefixes array (Zod validation)
+  if (accessToken) {
+    await runner.test('DELETE /api/recordings/storage with empty prefixes array', {
+      testNumber: 48,
+      method: 'DELETE',
+      endpoint: '/api/recordings/storage',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { prefixes: [] },
+      expectedStatus: 400,
+      customValidator: (body) => {
+        const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+        
+        return {
+          passed: isZodError,
+          message: isZodError 
+            ? 'Should return ZodError for empty prefixes array'
+            : `Expected ZodError for empty array. Got: ${JSON.stringify(body?.error)}`
+        };
+      },
+    });
+  }
+
+  // Test 49: DELETE /api/recordings/storage with prefixes exceeding 100 items (Zod validation)
+  if (accessToken) {
+    const manyPrefixes = Array.from({ length: 101 }, (_, i) => `${userId}/file-${i}.mp3`);
+    
+    await runner.test('DELETE /api/recordings/storage with prefixes exceeding 100 items', {
+      testNumber: 49,
+      method: 'DELETE',
+      endpoint: '/api/recordings/storage',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: { prefixes: manyPrefixes },
+      expectedStatus: 400,
+      customValidator: (body) => {
+        const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
+        
+        return {
+          passed: isZodError,
+          message: isZodError 
+            ? 'Should return ZodError for > 100 prefixes'
+            : `Expected ZodError for > 100 prefixes. Got: ${JSON.stringify(body?.error)}`
+        };
+      },
+    });
+  }
+
+  // Test 50: DELETE with mix of valid + invalid prefixes (strict response validation)
+  if (accessToken && userId && testData.recordings.length > 0) {
+    // Get one unattached recording for valid prefix
+    const unattachedRecording = testData.recordings.find(r => !r.attached);
+    
+    if (unattachedRecording) {
+      const validPrefix = unattachedRecording.path; // Should be userid/filename format
+      const nonExistentPrefix = `${userId}/this-file-does-not-exist-9999.mp3`;
+      const wrongUserIdPrefix = `00000000-0000-0000-0000-000000000000/fake-file.mp3`;
+      
+      const result = await runner.test('DELETE /api/recordings/storage - mix of valid/invalid prefixes', {
+        testNumber: 50,
+        method: 'DELETE',
+        endpoint: '/api/recordings/storage',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: {
+          prefixes: [validPrefix, nonExistentPrefix, wrongUserIdPrefix],
+        },
+        expectedStatus: 200,
+        expectedFields: ['deleted', 'failed', 'errors'],
+        customValidator: (body) => {
+          const hasRequiredFields = body?.deleted && Array.isArray(body.deleted)
+           && body?.failed && Array.isArray(body.failed)
+           && body?.errors && typeof body.errors === 'object';
+
+          if (!hasRequiredFields) {
+            return {
+              passed: false,
+              message: `Missing required fields. Got: ${JSON.stringify(Object.keys(body || {}))}`
+            };
+          }
+
+          // Strict validation: Option B (idempotent semantics)
+          // Both valid and non-existent files go to deleted (since .remove() returns success for both)
+          const validInDeleted = body.deleted.includes(validPrefix);
+          const nonExistentInDeleted = body.deleted.includes(nonExistentPrefix);
+          const wrongUserIdInFailed = body.failed.includes(wrongUserIdPrefix);
+          const wrongUserIdInErrors = body.errors[wrongUserIdPrefix];
+
+          const passed = validInDeleted && nonExistentInDeleted && wrongUserIdInFailed && wrongUserIdInErrors;
+
+          if (passed) {
+            console.log(`    ✓ Valid prefix in deleted: ${validPrefix}`);
+            console.log(`    ✓ Non-existent prefix also in deleted (idempotent): ${nonExistentPrefix}`);
+            console.log(`    ✓ Wrong userId prefix in failed with error: "${wrongUserIdInErrors}"`);
+          } else {
+            console.log(`    ✗ Response validation failed:`);
+            if (!validInDeleted) console.log(`      - Valid prefix NOT in deleted`);
+            if (!nonExistentInDeleted) console.log(`      - Non-existent prefix NOT in deleted (idempotent semantics)`);
+            if (!wrongUserIdInFailed) console.log(`      - Wrong userId NOT in failed`);
+            if (!wrongUserIdInErrors) console.log(`      - Wrong userId error message missing`);
+          }
+
+          return {
+            passed,
+            message: passed 
+              ? 'Response properly categorized all prefixes (idempotent delete semantics)'
+              : 'Response validation failed - see details above'
+          };
+        },
+      });
+    }
+  }
+  // Summary - only print tests 45-50 (not all 1-50)
+  // Filter results to only show delete storage tests
+  const deleteStorageResults = runner.results.filter(r => r.testNumber >= 45);
+  
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`Test Suite: Recordings API Tests`);
+  console.log(`${'='.repeat(60)}\n`);
+  
+  let passCount = 0;
+  let failCount = 0;
+  
+  deleteStorageResults.forEach((result) => {
+    const status = result.passed ? '✅' : '❌';
+    console.log(`${status} Test ${result.testNumber}: ${result.name}`);
+    
+    if (result.customMessage) {
+      console.log(`   ${result.customMessage}`);
+    }
+    
+    const responseBody = result.body || result.fullResponse || {};
+    const responseStr = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+    const truncated = responseStr.substring(0, 500);
+    
+    if (!result.passed) {
+      console.log(`   Expected: ${result.expectedStatus} | Got: ${result.status}`);
+      failCount++;
+    } else {
+      passCount++;
+    }
+    console.log(`   Response: ${truncated}${responseStr.length > 500 ? '...' : ''}`);
+    console.log(); // Double space
+  });
+  
+  console.log(`${'-'.repeat(60)}`);
+  const summary = runner.getSummary();
+  console.log(`Total Executed: ${deleteStorageResults.length} | Passed: ${passCount} | Failed: ${failCount} | Skipped: 0`);
+  console.log(`Pass Rate: ${passCount > 0 ? ((passCount / deleteStorageResults.length) * 100).toFixed(2) : 0}% | Duration: ${summary.duration}`);
+  console.log(`${'='.repeat(60)}\n`);
+  
+  // Save results to file
+  const resultsFile = runner.saveResults('recordings-tests.json', true);
+  console.log(`✅ Test results saved to: ${resultsFile}\n`);
+  
+  // Return summary for master test runner
+  return summary;
+}
+
+export { runRecordingsTests, runRecordingsCrudTests, runRecordingsUploadTests, runRecordingsDeleteStorageTests };

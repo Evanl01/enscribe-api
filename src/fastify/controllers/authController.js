@@ -787,3 +787,148 @@ export async function checkTokenValidity(authHeader) {
     return { success: false, error: err.message, user: null };
   }
 }
+
+/**
+ * Extract user ID from an access token JWT
+ * @param {string} token - JWT access token
+ * @returns {string|null} User ID or null if extraction fails
+ */
+export function extractUserIdFromAccessToken(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      return payload.sub || null;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Extract tid from wrapper JWT
+ * @param {string} wrapper - Signed wrapper JWT
+ * @returns {string|null} Token ID or null if extraction fails
+ */
+export function extractTidFromWrapper(wrapper) {
+  try {
+    const parts = wrapper.split('.');
+    if (parts.length === 3) {
+      const p64 = parts[1];
+      const payload = JSON.parse(Buffer.from(p64, 'base64url').toString('utf8'));
+      return payload.tid || null;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Decrypt and verify stored refresh token from DB row
+ * @param {object} row - refreshTokens table row with token_enc and token_hash
+ * @returns {object} { token: decrypted_token or null, error: error_message or null }
+ */
+export function decryptStoredRefreshToken(row) {
+  try {
+    const decrypted = encryptionUtils.decryptRefreshToken(row.token_enc);
+    const isValid = encryptionUtils.verifyTokenHash(decrypted, row.token_hash);
+    
+    if (!isValid) {
+      return { token: null, error: 'Hash verification failed' };
+    }
+    
+    return { token: decrypted, error: null };
+  } catch (err) {
+    console.error('[decryptStoredRefreshToken] Error:', err);
+    return { token: null, error: err.message };
+  }
+}
+
+/**
+ * Exchange raw refresh token with Supabase for new session
+ * Used by mobile clients who send raw tokens
+ * @param {string} rawRefreshToken - Raw Supabase refresh token
+ * @returns {object} { success, accessToken, refreshToken, error }
+ */
+export async function exchangeRawRefreshTokenWithSupabase(rawRefreshToken) {
+  try {
+    const baseUrl = `${process.env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/token`;
+    const url = `${baseUrl}?grant_type=refresh_token`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
+      body: JSON.stringify({ refresh_token: rawRefreshToken }),
+    });
+
+    if (!response.ok) {
+      let errorText = '<could not read body>';
+      try {
+        errorText = await response.text();
+      } catch (e) {
+        // ignore
+      }
+      console.error('[exchangeRawRefreshTokenWithSupabase] Supabase error:', errorText);
+      return { success: false, error: 'Supabase exchange failed', status: response.status };
+    }
+
+    const session = await response.json();
+    return {
+      success: true,
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token,
+      error: null,
+    };
+  } catch (err) {
+    console.error('[exchangeRawRefreshTokenWithSupabase] Error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Store rotated refresh token in DB and return wrapper JWT
+ * Used after exchanging tokens with Supabase
+ * @param {string} rawRefreshToken - New raw refresh token from Supabase
+ * @param {string} userId - User ID (extracted from access token or payload)
+ * @returns {object} { success, newTid, wrapper, error }
+ */
+export async function storeAndWrapNewRefreshToken(rawRefreshToken, userId) {
+  try {
+    const admin = supabaseAdmin();
+    const newTid = crypto.randomUUID();
+    const hashed = encryptionUtils.hashToken(rawRefreshToken);
+    const enc = encryptionUtils.encryptRefreshToken(rawRefreshToken);
+
+    const { error: insertErr } = await admin
+      .from(refreshTokensTable)
+      .insert([
+        {
+          id: newTid,
+          user_id: userId,
+          token_hash: hashed,
+          token_enc: enc,
+          issued_at: new Date().toISOString(),
+          last_activity_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + REFRESH_MAX_AGE_SECONDS * 1000).toISOString(),
+          revoked: false,
+        },
+      ]);
+
+    if (insertErr) {
+      console.error('[storeAndWrapNewRefreshToken] Insert error:', insertErr);
+      return { success: false, error: insertErr.message };
+    }
+
+    const wrapper = createRefreshWrapper(userId, newTid);
+    return { success: true, newTid, wrapper, error: null };
+  } catch (err) {
+    console.error('[storeAndWrapNewRefreshToken] Error:', err);
+    return { success: false, error: err.message };
+  }
+}

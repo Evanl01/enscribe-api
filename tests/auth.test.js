@@ -17,6 +17,34 @@ import { getTestAccount, hasTestAccounts } from './testConfig.js';
 const runner = new TestRunner('Authentication API Tests');
 
 /**
+ * Extract tid from wrapper JWT token (for token rotation validation)
+ * Wrapper JWT format: { sub: userId, tid: tokenId, iat, exp }
+ * @param {string} wrapperJwt - The wrapper JWT token (wrapper cookie value)
+ * @returns {string|null} The tid if extracted, null otherwise
+ */
+function extractTidFromWrapperJwt(wrapperJwt) {
+  if (!wrapperJwt) return null;
+  
+  try {
+    // Split JWT into parts: header.payload.signature
+    const parts = wrapperJwt.split('.');
+    if (parts.length !== 3) return null;
+    
+    // Decode payload (second part) from base64
+    const payload = parts[1];
+    // Add padding if needed for base64 decoding
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+    const decoded = Buffer.from(padded, 'base64').toString('utf-8');
+    const parsed = JSON.parse(decoded);
+    
+    return parsed?.tid || null;
+  } catch (err) {
+    console.error('  ❌ Error extracting tid from wrapper JWT:', err.message);
+    return null;
+  }
+}
+
+/**
  * Run all auth tests
  */
 async function runAuthTests() {
@@ -437,6 +465,10 @@ async function runAuthTests() {
         console.log(`  ℹ️  Extracted refresh token: ${refreshTokenCookie ? 'yes' : 'no'}`);
         if (refreshTokenCookie) {
           console.log(`  ℹ️  Cookie preview: ${refreshTokenCookie.slice(0, 50)}...`);
+          const initialTid = extractTidFromWrapperJwt(refreshTokenCookie);
+          if (initialTid) {
+            console.log(`  ℹ️  Initial tid: ${initialTid}`);
+          }
         }
         console.log();
 
@@ -526,6 +558,15 @@ async function runAuthTests() {
         // ===== REFRESH TESTS RUN LAST (after cookie-status tests) =====
         // Test 26: POST /api/auth/refresh with valid cookie (NOW RUN AFTER cookie tests)
         if (refreshTokenCookie) {
+          const oldTid = extractTidFromWrapperJwt(refreshTokenCookie);
+          let newTid = null;
+
+          // Wait 60 seconds to test JWT expiry/regeneration
+          console.log(`  ⚠️⚠️⚠️  Please check Supabase: Access token expiry time is  30s`);
+          console.log(`  ⏳ Waiting 30 seconds before refresh to test JWT regeneration...`);
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          console.log(`  ✅ Wait complete, proceeding with refresh test\n`);
+
           await runner.test('POST /api/auth/refresh with valid token', {
             method: 'POST',
             endpoint: '/api/auth/refresh',
@@ -534,67 +575,68 @@ async function runAuthTests() {
             },
             expectedStatus: 200,
             expectedFields: ['accessToken'],
-            customValidator: (body) => {
+            customValidator: (body, response) => {
               const hasAccessToken = body?.accessToken && typeof body.accessToken === 'string';
               newAccessToken = body?.accessToken;
-              // Note: Supabase may return the same access token on refresh if not near expiration
-              // The important part is token rotation (new tid in DB), which is validated in Test 27
+              
+              // Extract new tid from Set-Cookie header to validate token rotation
+              const setCookieHeader = response?.headers?.['set-cookie'];
+              if (setCookieHeader) {
+                const cookieMatch = setCookieHeader.match(/refresh_token=([^;]+)/);
+                if (cookieMatch) {
+                  const newWrapperJwt = cookieMatch[1];
+                  newTid = extractTidFromWrapperJwt(newWrapperJwt);
+                }
+              }
+
+              // Compare access tokens to verify JWT was regenerated
+              const jwtChanged = originalAccessToken && originalAccessToken !== newAccessToken;
+              
+              // Optionally decode JWTs to compare iat timestamps
+              let oldIat = null, newIat = null;
+              if (originalAccessToken && newAccessToken) {
+                try {
+                  const oldParts = originalAccessToken.split('.');
+                  const newParts = newAccessToken.split('.');
+                  if (oldParts.length === 3 && newParts.length === 3) {
+                    const oldPayload = oldParts[1];
+                    const newPayload = newParts[1];
+                    const oldPadded = oldPayload + '='.repeat((4 - (oldPayload.length % 4)) % 4);
+                    const newPadded = newPayload + '='.repeat((4 - (newPayload.length % 4)) % 4);
+                    const oldDecoded = JSON.parse(Buffer.from(oldPadded, 'base64').toString('utf-8'));
+                    const newDecoded = JSON.parse(Buffer.from(newPadded, 'base64').toString('utf-8'));
+                    oldIat = oldDecoded?.iat;
+                    newIat = newDecoded?.iat;
+                  }
+                } catch (err) {
+                  // Silently fail JWT decoding, not critical
+                }
+              }
+
+              // Log rotation validation
+              console.log(`    ℹ️  Token Rotation Validation:`);
+              console.log(`       Old tid: ${oldTid || 'unable to extract'}`);
+              console.log(`       New tid: ${newTid || 'unable to extract'}`);
+              if (oldTid && newTid) {
+                const tidRotated = oldTid !== newTid;
+                console.log(`       Tid rotation: ${tidRotated ? '✅ YES (tid changed)' : '❌ NO (tid unchanged)'}`);
+              }
+              console.log(`       Access Token changed: ${jwtChanged ? '✅ YES (new JWT)' : '❌ NO (same JWT)'}`);
+              if (oldIat && newIat) {
+                console.log(`       Old iat: ${oldIat}, New iat: ${newIat}`);
+              }
+
+              const passed = hasAccessToken && newTid && oldTid && oldTid !== newTid && jwtChanged;
               return {
-                passed: hasAccessToken,
-                message: hasAccessToken 
-                  ? 'Valid accessToken returned from Supabase (token rotation happens server-side)' 
-                  : 'No accessToken in response'
+                passed,
+                message: passed 
+                  ? '✅ Token rotated successfully (tid + JWT both changed)' 
+                  : (!hasAccessToken ? 'No accessToken in response' : 'Token rotation not detected (tid or JWT unchanged or missing)')
               };
             },
           });
         } else {
           console.warn('  ⚠️  Could not extract refresh token, skipping refresh tests');
-        }
-
-        // Test 27: Verify token rotation - new RT from refresh should work
-        // This validates that refreshRefreshToken actually rotates the token in the DB
-        if (refreshTokenCookie) {
-          let newRefreshTokenCookie = null;
-
-          // First: refresh to get new tokens
-          const refreshResponse = await fetch(`${runner.baseUrl}/api/auth/refresh`, {
-            method: 'POST',
-            headers: {
-              'Cookie': `refresh_token=${refreshTokenCookie}`,
-            },
-          });
-
-          // Extract new refresh token from Set-Cookie header
-          if (refreshResponse.ok) {
-            const setCookieHeader = refreshResponse.headers.get('set-cookie');
-            if (setCookieHeader) {
-              const match = setCookieHeader.match(/refresh_token=([^;]+)/);
-              if (match) {
-                newRefreshTokenCookie = match[1]; // Keep original encoding, don't decode
-              }
-            }
-          }
-
-          // Test the new RT works on a second refresh call
-          if (newRefreshTokenCookie) {
-            await runner.test('POST /api/auth/refresh with rotated token (token rotation validation)', {
-              method: 'POST',
-              endpoint: '/api/auth/refresh',
-              headers: {
-                'Cookie': `refresh_token=${newRefreshTokenCookie}`,
-              },
-              expectedStatus: 200,
-              expectedFields: ['accessToken'],
-              customValidator: (body) => {
-                return {
-                  passed: body?.accessToken && typeof body.accessToken === 'string',
-                  message: body?.accessToken ? 'Rotated token works - RT properly stored in DB' : 'Rotated token should work after refresh'
-                };
-              },
-            });
-          } else {
-            console.warn('  ⚠️  Could not extract new token from refresh response, skipping rotation validation');
-          }
         }
       } catch (err) {
         console.error('  ❌ Failed to extract tokens for refresh tests:', err.message);

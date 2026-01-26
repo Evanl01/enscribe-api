@@ -99,6 +99,36 @@ export const recordingCreateRequestSchema = z.object({
 });
 
 /**
+ * POST request for generating a signed upload URL
+ * Endpoint: POST /api/recordings/create-signed-upload-url
+ */
+export const recordingUploadRequestSchema = z.object({
+  filename: z.string('Filename is required').min(1, 'Filename is required'),
+});
+
+/**
+ * POST request for generating a signed download URL
+ * Endpoint: POST /api/recordings/create-signed-url
+ */
+export const recordingCreateSignedUrlRequestSchema = z.object({
+  path: z.string('Path is required').min(1, 'Path is required'),
+});
+
+/**
+ * DELETE request for bulk deleting storage files
+ * Endpoint: DELETE /api/recordings/storage
+ * Deletes only storage files (not DB records)
+ */
+export const deleteRecordingsStorageRequestSchema = z.object({
+  prefixes: z.array(
+    z.string().min(1, 'Each prefix must be a non-empty string'),
+    { invalid_type_error: 'prefixes must be an array' }
+  )
+    .min(1, 'prefixes array must contain at least one prefix')
+    .max(100, 'prefixes array cannot exceed 100 items'),
+});
+
+/**
  * POST request for creating a transcript
  * Endpoint: POST /api/transcripts
  */

@@ -129,12 +129,15 @@ async function authRoutes(fastify, opts) {
             try {
               wrapper = authController.createRefreshWrapper(result.user.id, result.tid);
               console.log('[sign-in] Wrapper JWT created for tid:', result.tid);
+              console.log('[sign-in] Wrapper JWT value:', wrapper);
+              console.log('[sign-in] Wrapper JWT length:', wrapper.length);
             } catch (err) {
               console.error('[sign-in] Failed to create wrapper JWT:', err);
             }
           }
           
           const setCookie = wrapper ? authController.makeRefreshCookie(wrapper) : '';
+          console.log('[sign-in] Set-Cookie header value:', setCookie);
           
           // Create safe session without refresh_token (matches legacy backend behavior)
           const safeSession = { ...result.session };
@@ -240,106 +243,80 @@ async function authRoutes(fastify, opts) {
 
   /**
    * POST /auth/refresh
-   * Refreshes access token using refresh token from cookie
+   * Refreshes access token using refresh token from cookie (web) or body (mobile)
    * Returns new access token with new wrapper JWT (token rotation)
+   * 
+   * Web: Cookie contains signed wrapper JWT
+   * Mobile: Body contains { refresh_token: "raw_supabase_token" }
    */
   fastify.post('/auth/refresh', async (request, reply) => {
     try {
-      fastify.log.info({
-        event: 'auth_refresh',
-        step: 'request_received',
-        availableCookies: Object.keys(request.cookies),
-        cookieCount: Object.keys(request.cookies).length,
-        rawCookieHeader: request.headers.cookie || 'NO_HEADER',
-      });
+      // Get refresh token from body (mobile) or cookie (web)
+      const wrapperFromBody = request.body?.refresh_token;
+      const wrapperFromCookie = request.cookies.refresh_token;
+      const wrapper = wrapperFromBody || wrapperFromCookie;
 
-      const wrapper = request.cookies.refresh_token || null;
-      
       if (!wrapper) {
-        fastify.log.error({
-          event: 'auth_refresh',
-          step: 'no_cookie',
-          error: 'No refresh token cookie found',
-          availableCookies: Object.keys(request.cookies),
-          allCookies: request.cookies,
-          cookieHeader: request.headers.cookie,
-        });
-        return reply.status(401).send({ error: 'No refresh token cookie found' });
+        return reply.status(401).send({ error: 'No refresh token provided' });
       }
 
-      // Extract tid from wrapper for logging
-      let wrapperTid = null;
-      try {
-        const parts = wrapper.split('.');
-        if (parts.length === 3) {
-          const p64 = parts[1];
-          const payload = JSON.parse(Buffer.from(p64, 'base64url').toString('utf8'));
-          wrapperTid = payload.tid;
+      const isFromMobile = !!wrapperFromBody;
+
+      // Mobile path: exchange raw token with Supabase
+      if (isFromMobile) {
+        const exchangeResult = await authController.exchangeRawRefreshTokenWithSupabase(wrapper);
+        if (!exchangeResult.success) {
+          return reply.status(401).send({ error: 'Token exchange failed' });
         }
-      } catch (e) {
-        // ignore
+
+        const userId = authController.extractUserIdFromAccessToken(exchangeResult.accessToken);
+        const storeResult = await authController.storeAndWrapNewRefreshToken(exchangeResult.refreshToken, userId);
+        
+        if (!storeResult.success) {
+          return reply.status(500).send({ error: 'Token storage failed' });
+        }
+
+        // Set cookie for mobile (may be ignored)
+        reply.setCookie('refresh_token', storeResult.wrapper, {
+          httpOnly: true,
+          secure: process.env.REFRESH_COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
+          sameSite: (process.env.REFRESH_COOKIE_SAMESITE || 'lax').toLowerCase(),
+          path: '/',
+          maxAge: Number(process.env.REFRESH_MAX_AGE_SECONDS || 3 * 24 * 3600),
+        });
+
+        return reply.status(200).send({
+          accessToken: exchangeResult.accessToken,
+        });
       }
 
-      fastify.log.info({
-        event: 'auth_refresh',
-        step: 'start',
-        wrapperTid,
-        wrapperLength: wrapper?.length || 0,
-        wrapperPreview: wrapper ? wrapper.substring(0, 50) + '...' : 'null',
-      });
-
+      // Web path: validate wrapper JWT and exchange stored token
       const result = await authController.refreshRefreshToken(wrapper, fastify.log);
 
       if (!result.success) {
-        fastify.log.error({
-          event: 'auth_refresh',
-          step: 'failed',
-          error: result.error,
-          wrapperTid,
-          userId: result.debugUserId || 'unknown',
-          oldTokenId: result.debugOldTokenId || 'unknown',
-        });
-        
         // Clear invalid cookie
-        const clearCookie = authController.makeRefreshCookie('', { maxAge: 0 });
-        reply.header('set-cookie', clearCookie);
-        
+        reply.setCookie('refresh_token', '', {
+          httpOnly: true,
+          secure: process.env.REFRESH_COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
+          sameSite: (process.env.REFRESH_COOKIE_SAMESITE || 'lax').toLowerCase(),
+          path: '/',
+          maxAge: 0,
+        });
         return reply.status(401).send({ error: result.error });
       }
 
-      // Success - create new wrapper JWT with new tid and return new access token
-      fastify.log.info({
-        event: 'auth_refresh',
-        step: 'success',
-        newTokenId: result.newTokenId,
-      });
       // Extract user ID from access token for new wrapper JWT
-      let userId = null;
-      try {
-        const parts = result.accessToken.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-          userId = payload.sub || null;
-        }
-      } catch (e) {
-        fastify.log.warn({
-          event: 'auth_refresh',
-          step: 'warning',
-          message: 'Could not extract user ID from access token',
-        });
-      }
-
-      // Create new wrapper JWT with new tid
+      const userId = authController.extractUserIdFromAccessToken(result.accessToken);
       const newWrapper = authController.createRefreshWrapper(userId, result.newTokenId);
-      
-      // Set refresh token cookie using Fastify's setCookie method for proper cookie handling
+
+      // Set new refresh token cookie
       const REFRESH_MAX_AGE_SECONDS = Number(process.env.REFRESH_MAX_AGE_SECONDS || 3 * 24 * 3600);
       const REFRESH_COOKIE_SAMESITE = (process.env.REFRESH_COOKIE_SAMESITE || 'lax').toLowerCase();
       const REFRESH_COOKIE_SECURE = process.env.REFRESH_COOKIE_SECURE
         ? process.env.REFRESH_COOKIE_SECURE === 'true'
         : process.env.NODE_ENV === 'production';
       const REFRESH_COOKIE_DOMAIN = process.env.REFRESH_COOKIE_DOMAIN || undefined;
-      
+
       reply.setCookie('refresh_token', newWrapper, {
         httpOnly: true,
         secure: REFRESH_COOKIE_SECURE,
@@ -349,23 +326,12 @@ async function authRoutes(fastify, opts) {
         ...(REFRESH_COOKIE_DOMAIN && { domain: REFRESH_COOKIE_DOMAIN }),
       });
 
-      fastify.log.info({
-        event: 'auth_refresh',
-        step: 'cookie_set',
-        newTokenId: result.newTokenId,
-        cookieMaxAge: REFRESH_MAX_AGE_SECONDS,
-      });
-
       return reply.status(200).send({
         accessToken: result.accessToken,
       });
     } catch (err) {
-      fastify.log.error({
-        event: 'auth_refresh',
-        step: 'error',
-        error: err.message,
-      });
-      return reply.status(500).send({ error: 'Failed to refresh token' });
+      fastify.log.error('[POST /auth/refresh] Error:', err);
+      return reply.status(500).send({ error: 'Refresh failed' });
     }
   });
 

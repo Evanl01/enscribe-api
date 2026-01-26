@@ -109,7 +109,7 @@ export async function getRecordingsAttachments(request, reply) {
         // Decrypt patientEncounter name if present
         if (patientEncounterData && patientEncounterData.encrypted_name) {
           try {
-            const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
+            // const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
             const decryptPatientEncounterResult = await encryptionUtils.decryptField(patientEncounterData, 'name', patientEncounterData.encrypted_aes_key);
             if (!decryptPatientEncounterResult.success) {
               console.error('Failed to decrypt patient encounter name:', decryptPatientEncounterResult.error);
@@ -238,7 +238,7 @@ export async function createRecording(request, reply) {
     // Check authentication
     const userId = request.user?.id;  // Supabase returns ID in 'id' property, not 'sub'
     if (!userId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(401).send({ error: 'Unauthorized' });
     }
 
     const { patientEncounter_id, recording_file_path } = request.body;
@@ -389,8 +389,8 @@ export async function getRecordings(request, reply) {
 }
 
 /**
- * Delete a recording and its associated file
- * DELETE /api/recordings/:id
+ * Delete a recording and its associated file (complete removal from DB + storage)
+ * DELETE /api/recordings/complete/:id
  */
 export async function deleteRecording(request, reply) {
   try {
@@ -519,3 +519,338 @@ export async function deleteRecording(request, reply) {
 //     return reply.status(500).send({ error: 'Internal server error' });
 //   }
 // }
+
+/**
+ * Generate signed download URL for file access
+ * POST /api/recordings/create-signed-url
+ * 
+ * Body:
+ * - path: string (required, format: {userUUID}/{filename})
+ * 
+ * Returns:
+ * - signedUrl: string (Supabase signed download URL, valid 1 hour)
+ * - expiresIn: number (expiration time in seconds, 3600 = 1 hour)
+ */
+export async function createSignedUrl(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user || !user.id) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { path } = request.body;
+
+    // Validate path format: should be userid/filename
+    const pathParts = path.split('/');
+    if (pathParts.length !== 2) {
+      request.log.warn('[createSignedUrl] Invalid path format', {
+        receivedPath: path,
+        pathParts: pathParts.length,
+        expected: 'userid/filename',
+        userId: user.id,
+      });
+      return reply.status(400).send({ error: 'Invalid path format. Expected: userid/filename' });
+    }
+
+    const [pathUserId, filename] = pathParts;
+
+    // Verify ownership: path folder must match user's UUID
+    if (pathUserId !== user.id) {
+      request.log.warn('[createSignedUrl] Ownership check failed', {
+        userId: user.id,
+        pathUserId: pathUserId,
+        filename: filename,
+        action: 'Access denied',
+      });
+      return reply.status(403).send({ error: 'Access denied: path does not belong to your account' });
+    }
+
+    // Validate filename is not empty
+    if (!filename || filename.length === 0) {
+      request.log.warn('[createSignedUrl] Empty filename', {
+        path: path,
+        userId: user.id,
+      });
+      return reply.status(400).send({ error: 'Invalid filename' });
+    }
+
+    const expirySeconds = 60 * 60; // 1 hour
+
+    // Generate signed URL using Supabase SDK
+    console.log(`[createSignedUrl] Generating signed URL for path: ${path}`);
+    const { data: signedUrlData, error: urlError } = await supabase.storage
+      .from('audio-files')
+      .createSignedUrl(path, expirySeconds);
+
+    if (urlError || !signedUrlData) {
+      console.error('[createSignedUrl] Error creating signed URL:', urlError);
+      return reply.status(500).send({ error: 'Failed to generate signed URL' });
+    }
+
+    console.log('[createSignedUrl] Successfully generated signed URL:', {
+      path: path,
+      url: signedUrlData.signedUrl?.substring(0, 100) + '...',
+    });
+
+    return reply.status(200).send({
+      signedUrl: signedUrlData.signedUrl,
+      expiresIn: expirySeconds,
+    });
+
+  } catch (error) {
+    console.error('Error in createSignedUrl:', error);
+    return reply.status(500).send({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * Generate signed upload URL for file upload
+ * POST /api/recordings/create-signed-upload-url
+ * 
+ * Body:
+ * - filename: string (required, with extension)
+ * 
+ * Returns:
+ * - success: boolean
+ * - path: string (full storage path: userid/filename)
+ * - filename: string (actual filename used, may differ if collision detected)
+ * - signedUrl: string (Supabase signed upload URL, valid 2 hours)
+ * - expiresAt: number (expiration time in seconds, 3600 = 1 hour)
+ */
+export async function uploadRecordingUrl(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user || !user.id || !user.email) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { filename } = request.body;
+
+    // Strip user.id prefix if filename already includes it (defensive fix for frontend sending full path)
+    let cleanFilename = filename;
+    if (filename.startsWith(user.id + '/')) {
+      request.log.warn(`[uploadRecordingUrl] Filename includes user.id prefix, stripping it`, {
+        originalFilename: filename,
+        userId: user.id,
+      });
+      cleanFilename = filename.substring(user.id.length + 1); // +1 for the '/'
+    }
+
+    // Extract extension from filename
+    const lastDot = cleanFilename.lastIndexOf('.');
+    if (lastDot === -1) {
+      return reply.status(400).send({ error: 'Filename must include extension' });
+    }
+
+    const extension = cleanFilename.substring(lastDot + 1).toLowerCase();
+    const validExtensions = ['mp3', 'wav', 'webm', 'ogg', 'm4a', 'mp4'];
+
+    if (!validExtensions.includes(extension)) {
+      return reply.status(400).send({
+        error: `Invalid file extension. Allowed: ${validExtensions.join(', ')}`
+      });
+    }
+
+    // Collision detection: Try to find unused filename (10 attempts max)
+    const userFolder = user.id;
+    let finalFilename = cleanFilename;
+    let collisionAttempt = 0;
+    const maxAttempts = 10;
+
+    for (collisionAttempt = 0; collisionAttempt < maxAttempts; collisionAttempt++) {
+      // Check if file exists in Supabase storage
+      const { data: existingFiles, error: listError } = await supabase.storage
+        .from('audio-files')
+        .list(userFolder, { search: finalFilename });
+
+      if (listError) {
+        console.error(`[uploadRecordingUrl] List error on attempt ${collisionAttempt + 1}:`, listError);
+        return reply.status(500).send({ error: 'Storage check failed' });
+      }
+
+      // If no matching files, we can use this filename
+      if (!existingFiles || existingFiles.length === 0) {
+        if (collisionAttempt > 0) {
+          console.log(`[uploadRecordingUrl] Found available filename after ${collisionAttempt} collision(s):`, finalFilename);
+        }
+        break;
+      }
+
+      // File exists, try with new random suffix
+      console.log(`[uploadRecordingUrl] Collision attempt ${collisionAttempt + 1}: ${finalFilename} already exists`);
+
+      if (collisionAttempt < maxAttempts - 1) {
+        // Generate new random suffix and retry
+        const nameParts = cleanFilename.split('.');
+        const baseName = nameParts.slice(0, -1).join('.');
+        const ext = nameParts[nameParts.length - 1];
+        const randomSuffix = Math.floor(Math.random() * 100)
+          .toString()
+          .padStart(2, '0');
+        finalFilename = `${baseName}-${randomSuffix}.${ext}`;
+      }
+    }
+
+    if (collisionAttempt >= maxAttempts) {
+      console.error(`[uploadRecordingUrl] Failed to find available filename after ${maxAttempts} attempts`);
+      return reply.status(500).send({ error: 'Could not generate unique filename' });
+    }
+
+    const finalPath = `${userFolder}/${finalFilename}`;
+
+    // Generate proper signed upload URL using Supabase JS client
+    // This creates a URL with embedded signature that's valid for 2 hours
+    console.log(`[uploadRecordingUrl] Calling createSignedUploadUrl with path: ${finalPath}`);
+    const { data: uploadUrlData, error: urlError } = await supabase.storage
+      .from('audio-files')
+      .createSignedUploadUrl(finalPath);
+
+    console.log(`[uploadRecordingUrl] createSignedUploadUrl response:`, {
+      hasData: !!uploadUrlData,
+      hasError: !!urlError,
+      error: urlError?.message || null,
+      data: uploadUrlData ? { signedUrl: uploadUrlData.signedUrl?.substring(0, 100) + '...' } : null,
+    });
+
+    if (urlError || !uploadUrlData) {
+      console.error('[uploadRecordingUrl] Error creating signed upload URL:', urlError);
+      return reply.status(500).send({ error: 'Failed to generate upload URL' });
+    }
+
+    const signedUrl = uploadUrlData.signedUrl;
+
+    console.log('[uploadRecordingUrl] Successfully generated signed upload URL:', {
+      path: finalPath,
+      signedUrl: signedUrl.substring(0, 100) + '...',
+      collisionAttempts: collisionAttempt,
+    });
+
+    return reply.status(200).send({
+      success: true,
+      path: finalPath,
+      filename: finalFilename,
+      signedUrl: signedUrl,
+      expiresAt: 3600, // Expected expiration time in seconds (1 hour)
+    });
+
+  } catch (error) {
+    console.error('Error in uploadRecordingUrl:', error);
+    request.log.error(`[uploadRecordingUrl] Exception caught:`, { message: error.message, stack: error.stack });
+    return reply.status(500).send({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * Delete storage files in bulk (storage only, no DB records deleted)
+ * DELETE /api/recordings/storage
+ * 
+ * Body:
+ * - prefixes: string[] (required, format: userid/filename)
+ *
+ * Returns (idempotent semantics):
+ * - deleted: string[] (all successfully processed files - whether they existed or not)
+ * - failed: string[] (files that failed deletion due to permission/auth errors)
+ * - errors: Record<string, string> (error messages per failed prefix)
+ * 
+ * Note: Supabase .remove() is idempotent - non-existent files also return success.
+ * Therefore, both existing files and non-existent files go to the "deleted" array.
+ * Only permission errors go to "failed".
+ */
+export async function deleteRecordingsStorage(request, reply) {
+  try {
+    const supabase = getSupabaseClient(request.headers.authorization);
+    const user = request.user;
+
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const userId = user.id;
+    const { prefixes } = request.body;
+
+    // Initialize result tracking
+    const result = {
+      deleted: [],
+      failed: [],
+      errors: {},
+    };
+
+    console.log(`[deleteRecordingsStorage] Processing ${prefixes.length} prefix(es) for user ${userId}`);
+
+    // Process each prefix
+    for (const prefix of prefixes) {
+      try {
+        // Validate prefix format (should be userid/filename)
+        const pathParts = prefix.split('/');
+        if (pathParts.length !== 2) {
+          const errorMsg = 'Invalid path format. Expected: userid/filename';
+          result.failed.push(prefix);
+          result.errors[prefix] = errorMsg;
+          console.warn(`[deleteRecordingsStorage] Invalid format: ${prefix}`);
+          continue;
+        }
+
+        const [pathUserId, filename] = pathParts;
+
+        // Verify ownership: path folder must match user's UUID
+        if (pathUserId !== userId) {
+          const errorMsg = 'Ownership check failed: path does not belong to your account';
+          result.failed.push(prefix);
+          result.errors[prefix] = errorMsg;
+          console.warn(`[deleteRecordingsStorage] Ownership check failed for ${prefix}`, {
+            userId,
+            pathUserId,
+          });
+          continue;
+        }
+
+        // Validate filename is not empty
+        if (!filename || filename.length === 0) {
+          const errorMsg = 'Invalid filename';
+          result.failed.push(prefix);
+          result.errors[prefix] = errorMsg;
+          console.warn(`[deleteRecordingsStorage] Empty filename in prefix: ${prefix}`);
+          continue;
+        }
+
+        // Attempt to delete from storage
+        console.log(`[deleteRecordingsStorage] Deleting: ${prefix}`);
+        const { error: deleteError } = await supabase.storage
+          .from('audio-files')
+          .remove([prefix]);
+
+        if (deleteError) {
+          // Treat as failure only for permission/auth errors
+          const errorMsg = deleteError.message || 'Storage error';
+          result.failed.push(prefix);
+          result.errors[prefix] = errorMsg;
+          console.error(`[deleteRecordingsStorage] Storage error for ${prefix}:`, deleteError);
+        } else {
+          // Idempotent semantics: .remove() succeeds whether file exists or not
+          // Both actual deletions and non-existent files go to deleted
+          result.deleted.push(prefix);
+          console.log(`[deleteRecordingsStorage] Successfully processed: ${prefix}`);
+        }
+      } catch (prefixError) {
+        const errorMsg = prefixError.message || 'Unexpected error';
+        result.failed.push(prefix);
+        result.errors[prefix] = errorMsg;
+        console.error(`[deleteRecordingsStorage] Exception for prefix ${prefix}:`, prefixError);
+      }
+    }
+
+    console.log(`[deleteRecordingsStorage] Results:`, {
+      deleted: result.deleted.length,
+      failed: result.failed.length,
+    });
+
+    return reply.status(200).send(result);
+  } catch (error) {
+    console.error('Error in deleteRecordingsStorage:', error);
+    return reply.status(500).send({ error: 'Internal server error' });
+  }
+}

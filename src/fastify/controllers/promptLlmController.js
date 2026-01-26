@@ -39,6 +39,9 @@ function cleanRawText(s) {
     // Replace multiplication symbol (×) with standard x
     s = s.replace(/×/g, 'x');
     // Replace common fractions with text equivalents
+    // Replace plus-minus symbol (±) with text equivalent
+    s = s.replace(/±/g, '+/-');
+    
     s = s.replace(/½/g, '1/2');
     s = s.replace(/⅓/g, '1/3');
     s = s.replace(/⅔/g, '2/3');

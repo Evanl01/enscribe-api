@@ -83,7 +83,7 @@ export class TestRunner {
     // Apply custom validator if provided (always call it to get message even on failure)
     let customMessage = '';
     if (customValidator) {
-      const validationResult = customValidator(response.body);
+      const validationResult = customValidator(response.body, response);
       if (passed) {
         // Only update passed status if test already passed
         passed = passed && validationResult.passed;
