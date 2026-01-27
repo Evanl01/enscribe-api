@@ -12,6 +12,10 @@ const patientEncounterTableName = 'patientEncounters';
  * Get recordings with attachment status
  * GET /api/recordings/attachments
  * 
+ * OPTIMIZED FLOW:
+ * - attached=true: Paginate DB query (.range), batch fetch storage until all 100 recordings have metadata
+ * - attached=false: Get all recording paths (sorted A-Z for binary search), batch fetch storage, use binary search to find unattached
+ * 
  * Query Parameters:
  * - attached: 'true' or 'false' (required)
  * - limit: number (default: 100)
@@ -38,68 +42,72 @@ export async function getRecordingsAttachments(request, reply) {
     const attachedBool = attached === 'true';
     const userId = user.id;
 
-    // Get all recordings for this user with patientEncounter join
-    // RLS policy ensures user can only access their own recordings
-    const { data: recordingsData, error: recordingsError } = await supabase
-      .from(recordingTableName)
-      .select(`
-        *,
-        patientEncounters:patientEncounter_id (*)
-      `)
-      .order('recording_file_path', { ascending: true });
+    if (attachedBool) {
+      // ===== ATTACHED RECORDINGS =====
+      // Strategy: Paginate DB query, batch fetch storage until all 100 recordings have metadata
 
-    if (recordingsError) {
-      console.error('Error fetching recordings:', recordingsError);
-      return reply.status(500).send({ error: recordingsError.message });
-    }
+      // Query DB with pagination (only fetch the 100 we need)
+      const { data: recordingsData, error: recordingsError } = await supabase
+        .from(recordingTableName)
+        .select(`
+          *,
+          patientEncounters:patientEncounter_id (*)
+        `)
+        .range(offsetNum, offsetNum + limitNum - 1);
 
-    // Get all files from storage bucket for this user
-    const allStorageFiles = [];
-    const pageSize = 1000;
-    let offset_storage = 0;
-    let hasMoreFiles = true;
-
-    while (hasMoreFiles) {
-      const { data: storageData, error: storageError } = await supabase.storage
-        .from('audio-files')
-        .list(userId, {
-          limit: pageSize,
-          offset: offset_storage,
-          sortBy: { column: 'name', order: 'asc' }
-        });
-
-      if (storageError) {
-        console.error('Error fetching storage files:', storageError);
-        return reply.status(500).send({ error: storageError.message });
+      if (recordingsError) {
+        console.error('Error fetching recordings:', recordingsError);
+        return reply.status(500).send({ error: recordingsError.message });
       }
 
-      // If no data returned or empty array, we're done
-      if (!storageData || storageData.length === 0) {
-        hasMoreFiles = false;
-        break;
+      if (!recordingsData || recordingsData.length === 0) {
+        return reply.status(200).send([]);
       }
 
-      // Add files to our collection
-      allStorageFiles.push(...storageData);
+      // Extract paths for matching with storage
+      const recordingPaths = recordingsData.map(r => r.recording_file_path);
+      const storageFileMap = new Map();
 
-      // If we got fewer files than requested, we've reached the end
-      if (storageData.length < pageSize) {
-        hasMoreFiles = false;
-      } else {
-        // Move to next page
+      // Batch fetch storage files until we have all paths
+      let offset_storage = 0;
+      let foundCount = 0;
+      const batchSize = 200;
+
+      while (foundCount < recordingPaths.length) {
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('audio-files')
+          .list(userId, {
+            limit: batchSize,
+            offset: offset_storage,
+            sortBy: { column: 'name', order: 'asc' }
+          });
+
+        if (storageError) {
+          console.error('Error fetching storage files:', storageError);
+          // Continue with what we have
+          break;
+        }
+
+        if (!storageData || storageData.length === 0) {
+          break; // No more files in storage
+        }
+
+        // Add matching files to map
+        for (const file of storageData) {
+          const fullPath = `${userId}/${file.name}`;
+          if (recordingPaths.includes(fullPath)) {
+            storageFileMap.set(fullPath, file);
+            foundCount++;
+          }
+        }
+
         offset_storage += storageData.length;
       }
-    }
 
-    // Create a map of storage files by filename for quick lookup
-    const storageFileMap = new Map();
-    allStorageFiles.forEach(file => {
-      const fullPath = `${userId}/${file.name}`;
-      storageFileMap.set(fullPath, file);
-    });
+      // Cache decrypted encounters to avoid redundant decryption
+      const decryptedEncounterCache = new Map();
 
-    if (attachedBool) {
-      // Build attached recordings array (all records, not paginated yet)
+      // Build attached recordings array
       const attachedRecordings = await Promise.all(recordingsData.map(async recording => {
         const storageFile = storageFileMap.get(recording.recording_file_path);
         const missing = !storageFile;
@@ -108,41 +116,51 @@ export async function getRecordingsAttachments(request, reply) {
         
         // Decrypt patientEncounter name if present
         if (patientEncounterData && patientEncounterData.encrypted_name) {
-          try {
-            // const aes_key = encryptionUtils.decryptAESKey(patientEncounterData.encrypted_aes_key);
-            const decryptPatientEncounterResult = await encryptionUtils.decryptField(patientEncounterData, 'name', patientEncounterData.encrypted_aes_key);
-            if (!decryptPatientEncounterResult.success) {
-              console.error('Failed to decrypt patient encounter name:', decryptPatientEncounterResult.error);
-              // Keep the original data but mark as decryption failed
-              patientEncounterData = { ...patientEncounterData, name: '[Decryption Failed]' };
-            } else {
-              // Remove encrypted fields before returning
+          const encounterId = patientEncounterData.id;
+          
+          // Check cache first
+          if (decryptedEncounterCache.has(encounterId)) {
+            patientEncounterData = decryptedEncounterCache.get(encounterId);
+          } else {
+            // Decrypt and cache
+            try {
+              const decryptPatientEncounterResult = await encryptionUtils.decryptField(
+                patientEncounterData,
+                'name',
+                patientEncounterData.encrypted_aes_key
+              );
+              if (!decryptPatientEncounterResult.success) {
+                console.error('Failed to decrypt patient encounter name:', decryptPatientEncounterResult.error);
+                patientEncounterData = { ...patientEncounterData, name: '[Decryption Failed]' };
+                decryptedEncounterCache.set(encounterId, patientEncounterData);
+              } else {
+                const { encrypted_name, encrypted_aes_key, iv, ...cleanPatientEncounterData } = patientEncounterData;
+                patientEncounterData = cleanPatientEncounterData;
+                decryptedEncounterCache.set(encounterId, patientEncounterData);
+              }
+            } catch (error) {
+              console.error('Error decrypting patient encounter name:', error);
               const { encrypted_name, encrypted_aes_key, iv, ...cleanPatientEncounterData } = patientEncounterData;
-              patientEncounterData = cleanPatientEncounterData;
+              patientEncounterData = { ...cleanPatientEncounterData, name: '[Decryption Failed]' };
+              decryptedEncounterCache.set(encounterId, patientEncounterData);
             }
-          } catch (error) {
-            console.error('Error decrypting patient encounter name:', error);
-            // Keep the original data but mark as decryption failed
-            const { encrypted_name, encrypted_aes_key, iv, ...cleanPatientEncounterData } = patientEncounterData;
-            patientEncounterData = { ...cleanPatientEncounterData, name: '[Decryption Failed]' };
           }
         }
         
         return {
-          id: recording.id, // Include recording ID for signed URL fetching
+          id: recording.id,
           path: recording.recording_file_path,
           size: missing ? null : storageFile.metadata?.size || null,
           missing: missing,
           created_at: missing ? null : storageFile.created_at || null,
           updated_at: missing ? null : storageFile.updated_at || null,
           patientEncounter: patientEncounterData,
-          // Include database timestamps for sorting
           db_created_at: recording.created_at,
           db_updated_at: recording.updated_at
         };
       }));
 
-      // Apply sorting based on sortBy parameter
+      // Sort client-side once based on sortBy parameter
       attachedRecordings.sort((a, b) => {
         let valueA, valueB;
         
@@ -152,11 +170,9 @@ export async function getRecordingsAttachments(request, reply) {
           const comparison = valueA.localeCompare(valueB);
           return order === 'asc' ? comparison : -comparison;
         } else if (sortBy === 'created_at') {
-          // Use database timestamps for attached recordings
           valueA = new Date(a.db_created_at || 0);
           valueB = new Date(b.db_created_at || 0);
         } else if (sortBy === 'updated_at') {
-          // Use database timestamps for attached recordings
           valueA = new Date(a.db_updated_at || 0);
           valueB = new Date(b.db_updated_at || 0);
         }
@@ -168,30 +184,83 @@ export async function getRecordingsAttachments(request, reply) {
         return 0;
       });
 
-      // Remove temporary database timestamp fields and apply pagination
-      const result = attachedRecordings
-        .slice(offsetNum, offsetNum + limitNum)
-        .map(({ db_created_at, db_updated_at, ...recording }) => recording);
-
+      // Remove temporary database timestamp fields
+      const result = attachedRecordings.map(({ db_created_at, db_updated_at, ...recording }) => recording);
       return reply.status(200).send(result);
+
     } else {
-      // Build unattached files array (files in storage but not in recordings table)
-      const recordingPaths = new Set(recordingsData.map(r => r.recording_file_path));
-      
-      const unattachedFiles = [];
-      for (const file of allStorageFiles) {
-        const fullPath = `${userId}/${file.name}`;
-        if (!recordingPaths.has(fullPath)) {
-          unattachedFiles.push({
-            path: fullPath,
-            size: file.metadata?.size || null,
-            created_at: file.created_at || null,
-            updated_at: file.updated_at || null
-          });
-        }
+      // ===== UNATTACHED FILES =====
+      // Strategy: Get all recording paths (sorted A-Z), batch fetch storage, use binary search to find unattached
+
+      // Get ALL recording paths from DB, sorted A-Z for binary search
+      const { data: recordingsData, error: recordingsError } = await supabase
+        .from(recordingTableName)
+        .select('recording_file_path')
+        .order('recording_file_path', { ascending: true });
+
+      if (recordingsError) {
+        console.error('Error fetching recordings:', recordingsError);
+        return reply.status(500).send({ error: recordingsError.message });
       }
 
-      // Apply sorting based on sortBy parameter
+      // Convert to sorted array for binary search
+      const recordingPaths = (recordingsData || []).map(r => r.recording_file_path).sort();
+
+      // Binary search function: O(log n) lookup
+      const isAttached = (fullPath) => {
+        let left = 0, right = recordingPaths.length - 1;
+        while (left <= right) {
+          const mid = Math.floor((left + right) / 2);
+          if (recordingPaths[mid] === fullPath) return true;
+          if (recordingPaths[mid] < fullPath) left = mid + 1;
+          else right = mid - 1;
+        }
+        return false;
+      };
+
+      // Batch fetch storage and collect unattached files (capped at limit + offset)
+      const unattachedFiles = [];
+      let offset_storage = offsetNum; // Start from requested offset
+      const batchSize = 200;
+      let hasMoreFiles = true;
+
+      while (hasMoreFiles && unattachedFiles.length < limitNum) {
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('audio-files')
+          .list(userId, {
+            limit: batchSize,
+            offset: offset_storage
+          });
+
+        if (storageError) {
+          console.error('Error fetching storage files:', storageError);
+          break;
+        }
+
+        if (!storageData || storageData.length === 0) {
+          hasMoreFiles = false;
+          break;
+        }
+
+        // Check each file and add unattached ones
+        for (const file of storageData) {
+          if (unattachedFiles.length >= limitNum) break; // Cap at limit
+          
+          const fullPath = `${userId}/${file.name}`;
+          if (!isAttached(fullPath)) {
+            unattachedFiles.push({
+              path: fullPath,
+              size: file.metadata?.size || null,
+              created_at: file.created_at || null,
+              updated_at: file.updated_at || null
+            });
+          }
+        }
+
+        offset_storage += storageData.length;
+      }
+
+      // Sort unattached files based on sortBy parameter
       unattachedFiles.sort((a, b) => {
         let valueA, valueB;
         
@@ -201,11 +270,9 @@ export async function getRecordingsAttachments(request, reply) {
           const comparison = valueA.localeCompare(valueB);
           return order === 'asc' ? comparison : -comparison;
         } else if (sortBy === 'created_at') {
-          // Use storage timestamps for unattached files
           valueA = new Date(a.created_at || 0);
           valueB = new Date(b.created_at || 0);
         } else if (sortBy === 'updated_at') {
-          // Use storage timestamps for unattached files
           valueA = new Date(a.updated_at || 0);
           valueB = new Date(b.updated_at || 0);
         }
@@ -217,9 +284,8 @@ export async function getRecordingsAttachments(request, reply) {
         return 0;
       });
 
-      // Apply pagination to unattached files
-      const paginatedUnattached = unattachedFiles.slice(offsetNum, offsetNum + limitNum);
-      return reply.status(200).send(paginatedUnattached);
+      // Return collected unattached files (already capped at limit during collection)
+      return reply.status(200).send(unattachedFiles);
     }
 
   } catch (error) {
