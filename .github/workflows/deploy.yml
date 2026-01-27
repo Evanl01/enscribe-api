@@ -187,6 +187,10 @@ jobs:
           FASTIFY_HOST=0.0.0.0
           FASTIFY_PORT=${{ secrets.FASTIFY_PORT }}
           NODE_ENV=production
+          AZURE_OPENAI_API_VERSION=${{ secrets.AZURE_OPENAI_API_VERSION }}
+          AZURE_OPENAI_DEPLOYMENT=${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_KEY=${{ secrets.AZURE_OPENAI_KEY }}
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_URL=${{ secrets.OPENAI_API_URL }}
           GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
