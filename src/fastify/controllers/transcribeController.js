@@ -75,7 +75,7 @@ function expandDotPhrases(text, dotPhrases) {
       notatedExpansion = cleanExpansion;
     } else {
       // Explicit dot phrase triggers get the prefix
-      notatedExpansion = `{(This is the doctor's autofilled dotPhrase, place extra emphasis on this section of the transcript. If you use this text in the note's Objective section, make sure to copy this text verbatim) ${match.expansion}(end dotPhrase)}`;
+      notatedExpansion = `{(This is the doctor's autofilled dotPhrase, place extra emphasis on this section of the transcript.) ${match.expansion}(end dotPhrase)}`;
     }
     llmNotatedText = llmNotatedText.substring(0, match.start) + notatedExpansion + llmNotatedText.substring(match.end);
     
