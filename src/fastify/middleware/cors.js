@@ -11,6 +11,7 @@ const ALLOWED_ORIGINS = [
   'https://enscribe.sjpedgi.doctor',
   'https://enscribe-web.vercel.app',
   'https://emscribe.vercel.app',
+  'https://enscribe.online',
 
   // Development origins
   'http://localhost:3000',
