@@ -22,6 +22,7 @@ import { registerSoapNotesRoutes } from './routes/soapNotes.js';
 import { registerMaskPhiRoutes } from './routes/maskPhi.routes.js';
 import { registerTranscribeRoutes } from './routes/transcribe.routes.js';
 import { registerPromptLlmRoutes } from './routes/promptLlm.routes.js';
+import { registerPromptLlmJobsRoutes } from './routes/promptLlmJobs.routes.js';
 
 /**
  * Create and configure Fastify application
@@ -140,6 +141,9 @@ async function createFastifyApp(options = {}) {
     await registerTranscribeRoutes(apiScope);
     await registerPromptLlmRoutes(apiScope);
   }, { prefix: '/api' });
+
+  // Register job-based routes under /api/jobs
+  await fastify.register(registerPromptLlmJobsRoutes, { prefix: '/api/jobs' });
 
   // Health check route (no auth required)
   fastify.get('/health', async (request, reply) => {

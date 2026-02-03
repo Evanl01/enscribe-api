@@ -187,6 +187,23 @@ export const promptLlmRequestSchema = z.object({
 });
 
 /**
+ * POST request for creating a SOAP note generation job (polling-based)
+ * Endpoint: POST /api/jobs/prompt-llm
+ */
+export const createPromptLlmJobRequestSchema = z.object({
+  recording_file_path: z.string().min(1, 'Recording file path is required'),
+});
+
+/**
+ * GET request query parameters for retrieving job status
+ * Endpoint: GET /api/jobs/prompt-llm/:jobId
+ * Query param: ?includeResult=true (optional, includes parsed SOAP note if complete)
+ */
+export const getPromptLlmJobStatusQuerySchema = z.object({
+  includeResult: z.enum(['true', 'false']).optional().default('false'),
+}).catchall(z.any());
+
+/**
  * POST request for creating a dot phrase
  * Endpoint: POST /api/dot-phrases
  */
