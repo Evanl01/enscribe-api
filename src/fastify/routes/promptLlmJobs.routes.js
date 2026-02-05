@@ -23,7 +23,7 @@ export async function registerPromptLlmJobsRoutes(fastify) {
       // Validate request body using Zod schema
       const parseResult = createPromptLlmJobRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
-        return reply.status(400).send({ error: 'Invalid request', details: parseResult.error });
+        return reply.status(400).send({ error: parseResult.error });
       }
 
       request.body = parseResult.data;

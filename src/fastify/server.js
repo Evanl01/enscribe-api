@@ -21,7 +21,6 @@ import { registerTranscriptsRoutes } from './routes/transcripts.js';
 import { registerSoapNotesRoutes } from './routes/soapNotes.js';
 import { registerMaskPhiRoutes } from './routes/maskPhi.routes.js';
 import { registerTranscribeRoutes } from './routes/transcribe.routes.js';
-import { registerPromptLlmRoutes } from './routes/promptLlm.routes.js';
 import { registerPromptLlmJobsRoutes } from './routes/promptLlmJobs.routes.js';
 
 /**
@@ -139,7 +138,6 @@ async function createFastifyApp(options = {}) {
     await registerSoapNotesRoutes(apiScope);
     await registerMaskPhiRoutes(apiScope);
     await registerTranscribeRoutes(apiScope);
-    await registerPromptLlmRoutes(apiScope);
   }, { prefix: '/api' });
 
   // Register job-based routes under /api/jobs

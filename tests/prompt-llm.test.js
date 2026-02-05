@@ -1,12 +1,15 @@
 /**
  * Test Suite: OpenAI Prompt-LLM API (SOAP Note Generation)
  * 
- * Tests the SOAP note and billing generation pipeline:
+ * Tests the SOAP note and billing generation pipeline via job-based polling:
  * - Authentication validation
  * - Request validation (recording_file_path required)
- * - Real OpenAI API call (test 4) - reused for dependent tests
+ * - Job creation and asynchronous processing (test 4) - reused for dependent tests
  * - SOAP note structure validation
  * - Special character normalization
+ * 
+ * Architecture: POST /api/jobs/prompt-llm (202) → GET /api/jobs/prompt-llm/:jobId (poll)
+ * Polling: 10s initial, exponential backoff to 45s on HTTP error, 10min timeout
  * 
  * Note: Transcription and PHI masking are tested separately in GCP and AWS tests.
  * This test focuses only on the OpenAI LLM functionality.
@@ -58,32 +61,9 @@ function loadTestData() {
 }
 
 /**
- * Parse SSE response stream
- * Handles Server-Sent Events format: data: {...}\n\n
+ * Helper: Make HTTP request with simple JSON response
  */
-function parseSseEvents(text) {
-  const events = [];
-  const lines = text.split('\n');
-  
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      try {
-        const event = JSON.parse(line.substring(6));
-        events.push(event);
-      } catch (err) {
-        // Skip non-JSON lines
-      }
-    }
-  }
-  
-  return events;
-}
-
-/**
- * Helper: Make request to prompt-llm endpoint with proper SSE streaming support
- * Matches frontend implementation in new-patient-encounter/page.jsx
- */
-async function makePromptLlmRequest(method, endpoint, body, headers = {}) {
+async function makeRequest(method, endpoint, body, headers = {}) {
   const url = `${runner.baseUrl}${endpoint}`;
   
   try {
@@ -96,103 +76,141 @@ async function makePromptLlmRequest(method, endpoint, body, headers = {}) {
       body: body ? JSON.stringify(body) : null,
     });
 
-    // For SSE responses, we need to read the stream properly
-    if (!response.ok) {
-      const text = await response.text();
-      return {
-        status: response.status,
-        headers: Object.fromEntries(response.headers || []),
-        body: [],
-        ok: false,
-        passed: false,
-        rawText: text,
-      };
-    }
-
-    // Read SSE stream using reader (matching frontend implementation)
-    if (!response.body || !response.body.getReader) {
-      const text = await response.text();
-      const events = parseSseEvents(text);
-      return {
-        status: response.status,
-        headers: Object.fromEntries(response.headers || []),
-        body: events,
-        ok: response.ok,
-        passed: response.ok && events.length > 0,
-        rawText: text,
-      };
-    }
-
-    // Use reader for proper stream handling
-    const reader = response.body.getReader();
-    let buffer = '';
-    let allText = '';
-    const events = [];
-
+    const text = await response.text();
+    let jsonBody = {};
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = new TextDecoder().decode(value);
-        allText += chunk;
-        buffer += chunk;
-
-        // Parse complete lines
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.trim().startsWith('data: ')) {
-            try {
-              const jsonStr = line.substring(6).trim();
-              if (jsonStr) {
-                const event = JSON.parse(jsonStr);
-                events.push(event);
-              }
-            } catch (e) {
-              // Skip malformed JSON lines
-              console.warn('Failed to parse SSE event:', line);
-            }
-          }
-        }
-      }
-
-      // Process any remaining data in buffer
-      if (buffer.trim().startsWith('data: ')) {
-        try {
-          const jsonStr = buffer.substring(6).trim();
-          if (jsonStr) {
-            const event = JSON.parse(jsonStr);
-            events.push(event);
-          }
-        } catch (e) {
-          console.warn('Failed to parse final SSE event:', buffer);
-        }
-      }
-    } finally {
-      reader.releaseLock();
+      jsonBody = text ? JSON.parse(text) : {};
+    } catch {
+      // Keep empty if not JSON
     }
 
     return {
       status: response.status,
       headers: Object.fromEntries(response.headers || []),
-      body: events,
+      body: jsonBody,
       ok: response.ok,
-      passed: response.ok && events.length > 0,
-      rawText: allText,
+      rawText: text,
     };
   } catch (error) {
     return {
       status: null,
       headers: {},
-      body: [],
+      body: {},
       ok: false,
-      passed: false,
       rawText: null,
       error: error.message,
+      isNetworkError: true,
     };
   }
+}
+
+/**
+ * Poll a job until completion or timeout
+ * Returns: { jobId, finalStatus, transcript_text, soap_note_text, soap_note, error_message, elapsed }
+ */
+async function pollJobUntilComplete(jobId, accessToken, maxWaitMs = 600000) {
+  const startTime = Date.now();
+  let pollInterval = 10000; // Start at 10s
+  const backoffCap = 45000; // Cap at 45s
+  let lastStatus = null;
+  const statusTransitions = [];
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    
+    // Poll for status
+    const response = await makeRequest('GET', `/api/jobs/prompt-llm/${jobId}`, null, {
+      Authorization: `Bearer ${accessToken}`,
+    });
+
+    if (!response.ok) {
+      // HTTP error - use exponential backoff
+      if (response.isNetworkError || response.status >= 500) {
+        pollInterval = Math.min(pollInterval * 2, backoffCap);
+        console.log(`   [${elapsed}s] HTTP ${response.status || 'error'} - backing off to ${pollInterval / 1000}s`);
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        continue;
+      } else {
+        // Client error (4xx) - fail immediately
+        return {
+          jobId,
+          finalStatus: 'error',
+          error_message: `Poll failed: HTTP ${response.status}`,
+          elapsed,
+          pollingFailed: true,
+        };
+      }
+    }
+
+    const job = response.body;
+    if (!job || !job.status) {
+      console.log(`   [${elapsed}s] Invalid response structure`);
+      pollInterval = Math.min(pollInterval * 2, backoffCap);
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      continue;
+    }
+
+    // Log status transition
+    if (job.status !== lastStatus) {
+      statusTransitions.push({ status: job.status, elapsed });
+      console.log(`   [${elapsed}s] ${lastStatus || 'pending'} → ${job.status}`);
+      lastStatus = job.status;
+      pollInterval = 10000; // Reset to 10s on status change
+    }
+
+    // Check if done
+    if (job.status === 'complete') {
+      // Fetch full result with parsed SOAP
+      const resultResponse = await makeRequest('GET', `/api/jobs/prompt-llm/${jobId}?includeResult=true`, null, {
+        Authorization: `Bearer ${accessToken}`,
+      });
+
+      if (!resultResponse.ok) {
+        const finalElapsed = Math.floor((Date.now() - startTime) / 1000);
+        return {
+          jobId,
+          finalStatus: 'complete',
+          error_message: `Failed to fetch result: HTTP ${resultResponse.status}`,
+          elapsed: finalElapsed,
+          resultFetchFailed: true,
+        };
+      }
+
+      const finalElapsed = Math.floor((Date.now() - startTime) / 1000);
+      return {
+        jobId,
+        finalStatus: 'complete',
+        transcript_text: resultResponse.body.transcript_text,
+        soap_note_text: resultResponse.body.soap_note_text,
+        soap_note: resultResponse.body.soap_note,
+        elapsed: finalElapsed,
+        statusTransitions,
+      };
+    } else if (job.status === 'error') {
+      const finalElapsed = Math.floor((Date.now() - startTime) / 1000);
+      return {
+        jobId,
+        finalStatus: 'error',
+        error_message: job.error_message || 'Unknown error',
+        elapsed: finalElapsed,
+        statusTransitions,
+      };
+    }
+
+    // Still pending/processing - wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+  }
+
+  // Timeout
+  const finalElapsed = Math.floor((Date.now() - startTime) / 1000);
+  return {
+    jobId,
+    finalStatus: 'timeout',
+    error_message: `Job did not complete within ${maxWaitMs / 1000}s`,
+    elapsed: finalElapsed,
+    statusTransitions,
+    timedOut: true,
+  };
 }
 
 /**
@@ -320,7 +338,7 @@ async function runAllPromptLlmTests() {
   // Test 1: Missing authentication
   await runner.test('Missing Authentication Header', {
     method: 'POST',
-    endpoint: '/api/prompt-llm',
+    endpoint: '/api/jobs/prompt-llm',
     body: { recording_file_path: recording.path },
     expectedStatus: 401,
     customValidator: (body) => {
@@ -336,7 +354,7 @@ async function runAllPromptLlmTests() {
   // Test 2: Invalid authentication token
   await runner.test('Invalid Authentication Token', {
     method: 'POST',
-    endpoint: '/api/prompt-llm',
+    endpoint: '/api/jobs/prompt-llm',
     body: { recording_file_path: recording.path },
     headers: { Authorization: `Bearer ${MOCK_TOKEN}` },
     expectedStatus: 401,
@@ -353,14 +371,16 @@ async function runAllPromptLlmTests() {
   // Test 3: Missing recording_file_path
   await runner.test('Missing recording_file_path Parameter', {
     method: 'POST',
-    endpoint: '/api/prompt-llm',
+    endpoint: '/api/jobs/prompt-llm',
     body: {},
     headers: { Authorization: `Bearer ${accessToken}` },
     expectedStatus: 400,
     customValidator: (body) => {
-      // Expect serialized ZodError format: {error: {name: 'ZodError', message: '[...]'}}
+      // Expect Zod error object in body.error
       const isZodError = body?.error?.name === 'ZodError' && body?.error?.message;
-      const hasRecordingPathIssue = /invalid_type.*recording_file_path/.test(JSON.stringify(body?.error));
+      // Check message contains both "invalid_type" and "recording_file_path" (handles newlines)
+      const message = body?.error?.message || '';
+      const hasRecordingPathIssue = message.includes('invalid_type') && message.includes('recording_file_path');
       
       return {
         passed: isZodError && hasRecordingPathIssue,
@@ -372,62 +392,84 @@ async function runAllPromptLlmTests() {
     testNumber: 3,
   });
 
-  // Test 4: REAL OpenAI call - Generate SOAP note (PRIMARY TEST)
-  console.log('\n⏳ Test 4 will make a real OpenAI API call. This may take 30-120 seconds...\n');
+  // Test 4: REAL OpenAI call - Generate SOAP note via job-based polling (PRIMARY TEST)
+  console.log('\n⏳ Test 4 will create a job and poll until complete (max 10 minutes)...\n');
   console.log('   Process: Audio → Transcribe (GCP) → Expand dot phrases → Mask PHI (AWS) → Generate SOAP (OpenAI o3)\n');
   
-  // Use makePromptLlmRequest for proper SSE streaming support
-  const soapResponse = await makePromptLlmRequest('POST', '/api/prompt-llm', 
+  // Create job
+  const createResponse = await makeRequest('POST', '/api/jobs/prompt-llm',
     { recording_file_path: recording.path },
     { Authorization: `Bearer ${accessToken}` }
   );
-  
+
   let test4Passed = false;
   let test4Message = '';
-  
-  if (soapResponse.status !== 200) {
-    test4Message = `Expected status 200, got ${soapResponse.status}`;
-  } else if (!Array.isArray(soapResponse.body) || soapResponse.body.length === 0) {
-    test4Message = 'No SSE events received';
+  let jobId = null;
+
+  if (!createResponse.ok || createResponse.status !== 202) {
+    test4Message = `Failed to create job: HTTP ${createResponse.status}`;
+  } else if (!createResponse.body?.id) {
+    test4Message = 'Job creation response missing job ID';
   } else {
-    // Validate transcription complete event contains transcript data
-    const transcriptionEvent = soapResponse.body.find(e => e.status === 'transcription complete');
-    if (!transcriptionEvent) {
-      test4Message = 'No transcription complete event received';
-    } else if (!transcriptionEvent.data?.transcript) {
-      test4Message = 'Transcription complete event missing transcript data (expandedTranscript was undefined)';
-    } else {
-      // Validate final SOAP note complete event
-      const finalEvent = soapResponse.body.find(e => e.status === 'soap note complete');
-      if (!finalEvent) {
-        test4Message = 'No completion event received';
-      } else if (!finalEvent.data) {
-        test4Message = 'Completion event has no data';
+    jobId = createResponse.body.id;
+    console.log(`✅ Job created: ${jobId}`);
+    console.log('⏳ Polling (10s initial interval, exponential backoff to 45s cap)...');
+
+    // Poll until complete
+    const pollResult = await pollJobUntilComplete(jobId, accessToken);
+
+    if (pollResult.timedOut) {
+      test4Message = `Job polling timed out after ${pollResult.elapsed}s`;
+    } else if (pollResult.pollingFailed || pollResult.resultFetchFailed) {
+      test4Message = pollResult.error_message;
+    } else if (pollResult.finalStatus === 'error') {
+      test4Message = `Job failed: ${pollResult.error_message}`;
+    } else if (pollResult.finalStatus === 'complete') {
+      if (!pollResult.soap_note) {
+        test4Message = 'Job completed but parsed SOAP note is missing';
       } else {
-        cachedSoapResponse = finalEvent.data;
-        test4Passed = true;
-        test4Message = 'Received complete SOAP response with transcript data';
+        // Parse soap_note if it's a string
+        let parsedSoapNote = pollResult.soap_note;
+        if (typeof pollResult.soap_note === 'string') {
+          try {
+            parsedSoapNote = JSON.parse(pollResult.soap_note);
+          } catch (err) {
+            test4Message = `Failed to parse SOAP note JSON: ${err.message}`;
+          }
+        }
+        
+        if (!test4Message) {
+          cachedSoapResponse = {
+            soap_note: parsedSoapNote.soap_note,
+            transcript_text: pollResult.transcript_text,
+            soap_note_text: pollResult.soap_note_text,
+            billing: parsedSoapNote.billing,
+          };
+          test4Passed = true;
+          test4Message = `Completed in ${pollResult.elapsed}s`;
+        }
       }
+    } else {
+      test4Message = `Unexpected final status: ${pollResult.finalStatus}`;
     }
   }
-  
+
   runner.results.push({
-    name: 'Generate SOAP Note from Recording (Real OpenAI API)',
+    name: 'Generate SOAP Note from Recording (Job-Based Polling)',
     passed: test4Passed,
-    endpoint: '/api/prompt-llm',
-    method: 'POST',
-    status: soapResponse.status,
-    expectedStatus: 200,
-    body: soapResponse.body,
+    endpoint: '/api/jobs/prompt-llm',
+    method: 'POST → GET (polling)',
+    status: createResponse.status,
+    expectedStatus: 202,
+    body: createResponse.body,
     customMessage: test4Message,
     testNumber: 4,
     timestamp: new Date().toISOString(),
   });
-  
+
   const test4Result = test4Passed ? '✅' : '❌';
-  console.log(`\n${test4Result} Test 4: Generate SOAP Note from Recording (Real OpenAI API)`);
+  console.log(`\n${test4Result} Test 4: Generate SOAP Note from Recording (Job-Based Polling)`);
   console.log(`   ${test4Message}`);
-  if (soapResponse.status) console.log(`   Expected: 200 | Got: ${soapResponse.status}`);
 
   // Test 5: Validate SOAP Structure (inline validation - dependent on test 4)
   let test5Passed = false;
@@ -436,9 +478,8 @@ async function runAllPromptLlmTests() {
     test5Message = '⚠️  SKIPPED: Test 4 failed, cannot validate SOAP structure';
   } else {
     try {
-      if (!cachedSoapResponse || typeof cachedSoapResponse !== 'object') {
-        test5Message = 'Response is not an object';
-      } else if (!cachedSoapResponse.soap_note || typeof cachedSoapResponse.soap_note !== 'object') {
+      // Response.soap_note is already parsed by jobController using parseSoapNotes()
+      if (!cachedSoapResponse.soap_note || typeof cachedSoapResponse.soap_note !== 'object') {
         test5Message = 'Missing or invalid soap_note object';
       } else {
         const sn = cachedSoapResponse.soap_note;
@@ -503,15 +544,15 @@ async function runAllPromptLlmTests() {
   runner.results.push({
     name: 'Validate SOAP Note Structure (from cached response)',
     passed: test5Passed,
-    endpoint: '/api/prompt-llm',
-    method: 'POST',
+    endpoint: '/api/jobs/prompt-llm',
+    method: 'GET (dependent on Test 4)',
     status: null,
     expectedStatus: null,
     body: cachedSoapResponse || {},
     customMessage: test5Message,
     testNumber: 5,
     timestamp: new Date().toISOString(),
-  });
+  }); 
   
   const test5Result = test5Passed ? '✅' : '⚠️ ';
   console.log(`\n${test5Result} Test 5: Validate SOAP Note Structure`);
@@ -587,8 +628,8 @@ async function runAllPromptLlmTests() {
   runner.results.push({
     name: 'Verify Special Character Normalization (from cached response)',
     passed: test6Passed,
-    endpoint: '/api/prompt-llm',
-    method: 'POST',
+    endpoint: '/api/jobs/prompt-llm',
+    method: 'GET (dependent on Test 4)',
     status: null,
     expectedStatus: null,
     body: cachedSoapResponse || {},
