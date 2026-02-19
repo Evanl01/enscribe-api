@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin';
 import * as authController from '../controllers/authController.js';
-import { serializeZodError } from '../utils/serializeZodError.js';
+import { serializeZodError } from '../../utils/serializeZodError.js';
 import {
   authSignUpRequestSchema,
   authSignInRequestSchema,
