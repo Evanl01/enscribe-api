@@ -84,22 +84,28 @@ async function authRoutes(fastify, opts) {
             
             const setCookie = wrapper ? authController.makeRefreshCookie(wrapper) : '';
             
-            // Create safe session without refresh_token
-            const safeSession = { ...result.session };
-            delete safeSession.refresh_token;
+            // For mobile (JSON) clients: include refresh_token in response
+            // For web clients: exclude refresh_token, use HTTP-only cookie instead
+            const sessionForResponse = isJsonClient(request)
+              ? result.session  // Mobile: return full session with refresh_token
+              : (() => {
+                  const safeSession = { ...result.session };
+                  delete safeSession.refresh_token;  // Web: remove refresh_token
+                  return safeSession;
+                })();
             
             if (isJsonClient(request)) {
               if (setCookie) reply.header('set-cookie', setCookie);
               return reply.status(201).send({
                 message: result.message,
                 user: result.user,
-                token: safeSession,
+                token: sessionForResponse,
               });
             } else {
               if (setCookie) reply.header('set-cookie', setCookie);
               return reply.status(201).send({
                 user: result.user,
-                token: safeSession,
+                token: sessionForResponse,
               });
             }
           } else {
@@ -139,26 +145,32 @@ async function authRoutes(fastify, opts) {
           const setCookie = wrapper ? authController.makeRefreshCookie(wrapper) : '';
           console.log('[sign-in] Set-Cookie header value:', setCookie);
           
-          // Create safe session without refresh_token (matches legacy backend behavior)
-          const safeSession = { ...result.session };
-          delete safeSession.refresh_token;
+          // For mobile (JSON) clients: include refresh_token in response
+          // For web clients: exclude refresh_token, use HTTP-only cookie instead
+          const sessionForResponse = isJsonClient(request)
+            ? result.session  // Mobile: return full session with refresh_token
+            : (() => {
+                const safeSession = { ...result.session };
+                delete safeSession.refresh_token;  // Web: remove refresh_token
+                return safeSession;
+              })();
           
-          console.log('[sign-in] safeSession keys:', Object.keys(safeSession));
-          console.log('[sign-in] safeSession.access_token:', safeSession.access_token ? `${String(safeSession.access_token).slice(0, 50)}...` : 'MISSING');
+          console.log('[sign-in] sessionForResponse keys:', Object.keys(sessionForResponse));
+          console.log('[sign-in] sessionForResponse.access_token:', sessionForResponse.access_token ? `${String(sessionForResponse.access_token).slice(0, 50)}...` : 'MISSING');
           
           if (isJsonClient(request)) {
             if (setCookie) reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               message: 'Signed in successfully',
               user: result.user,
-              token: safeSession,
+              token: sessionForResponse,
               tid: result.tid,
             });
           } else {
             if (setCookie) reply.header('set-cookie', setCookie);
             return reply.status(200).send({
               user: result.user,
-              token: safeSession,
+              token: sessionForResponse,
               tid: result.tid,
             });
           }
