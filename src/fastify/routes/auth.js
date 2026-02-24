@@ -299,6 +299,7 @@ async function authRoutes(fastify, opts) {
 
         return reply.status(200).send({
           accessToken: exchangeResult.accessToken,
+          refreshToken: exchangeResult.refreshToken,
         });
       }
 

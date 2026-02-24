@@ -239,6 +239,7 @@ export async function promptLlmProcessor(jobId, userId, authorizationHeader) {
     });
 
     // Step 3: Generate SOAP note and billing suggestion
+    const soapStartTime = Date.now();
     const soapNoteAndBillingReqBody = gptRequestBodies.getSoapNoteAndBillingRequestBody(maskedTranscript);
     let soapNoteAndBillingResultRaw;
 
@@ -264,8 +265,8 @@ export async function promptLlmProcessor(jobId, userId, authorizationHeader) {
 
     // Validate format
     const looksLikeJson = rawString.trim().startsWith('{');
-    const hasKeys = rawString.includes('soap_note') && rawString.includes('billing');
-    if (!looksLikeJson || !hasKeys) {
+    const hasSoapNote = rawString.includes('soap_note');
+    if (!looksLikeJson || !hasSoapNote) {
       throw new Error('LLM response does not appear to be valid JSON structure');
     }
 
@@ -301,8 +302,21 @@ export async function promptLlmProcessor(jobId, userId, authorizationHeader) {
       console.warn(`[promptLlmProcessor] ${jobId}: ${warning} - Auto-normalizing`);
     }
 
+    // Inject default billing if missing (LLM sometimes fails to generate)
+    if (!data.billing || typeof data.billing !== 'object') {
+      console.warn(`[promptLlmProcessor] ${jobId}: billing object missing, injecting defaults`);
+      data.billing = {
+        icd10_codes: [],
+        billing_code: '',
+        additional_inquiries: ''
+      };
+    }
+
     // Validate the normalized data
     validateSoapAndBilling(data);
+
+    const soapEndTime = Date.now();
+    console.log(`[promptLlmProcessor] ${jobId}: SOAP note complete (${(soapEndTime - soapStartTime) / 1000}s)`);
 
     // Extract only required fields, removing any extra metadata (e.g., "type" wrapper field)
     const cleanData = {
@@ -314,7 +328,6 @@ export async function promptLlmProcessor(jobId, userId, authorizationHeader) {
     const soapNoteText = JSON.stringify(cleanData);
 
     // Step 4: Update to complete status
-    const soapEndTime = Date.now();
     await updateJobStatus(jobId, 'complete', {
       soap_note_text: soapNoteText,
     });

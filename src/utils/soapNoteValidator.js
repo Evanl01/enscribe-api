@@ -15,7 +15,6 @@
 export function validateSoapAndBilling(obj) {
   if (!obj || typeof obj !== 'object') throw new Error('Response is not an object');
   if (!obj.soap_note || typeof obj.soap_note !== 'object') throw new Error('Missing soap_note object');
-  if (!obj.billing || typeof obj.billing !== 'object') throw new Error('Missing billing object');
 
   const s = obj.soap_note;
   if (!s.subjective || typeof s.subjective !== 'object') throw new Error('Missing subjective object');
@@ -37,14 +36,16 @@ export function validateSoapAndBilling(obj) {
     if (typeof s.objective[k] !== 'string') throw new Error(`objective.${k} must be a string`);
   }
 
-  // Billing checks
-  const b = obj.billing;
-  if (!Array.isArray(b.icd10_codes)) throw new Error('billing.icd10_codes must be an array');
-  if (typeof b.billing_code !== 'string') throw new Error('billing.billing_code must be a string');
-  if (typeof b.additional_inquiries !== 'string') throw new Error('billing.additional_inquiries must be a string');
+  // Billing is optional, but if present, validate structure
+  if (obj.billing && typeof obj.billing === 'object') {
+    const b = obj.billing;
+    if (!Array.isArray(b.icd10_codes)) throw new Error('billing.icd10_codes must be an array');
+    if (typeof b.billing_code !== 'string') throw new Error('billing.billing_code must be a string');
+    if (typeof b.additional_inquiries !== 'string') throw new Error('billing.additional_inquiries must be a string');
 
-  // Limit check
-  if (b.icd10_codes.length > 10) throw new Error('billing.icd10_codes has too many entries');
+    // Limit check
+    if (b.icd10_codes.length > 10) throw new Error('billing.icd10_codes has too many entries');
+  }
 
   return true;
 }
@@ -64,8 +65,7 @@ export function validateSoapAndBilling(obj) {
  */
 export function detectAndNormalizeResponse(obj) {
   // Format 1: Direct data (expected)
-  if (obj.soap_note && typeof obj.soap_note === 'object' && 
-      !obj.soap_note.type && obj.billing && !obj.billing.type) {
+  if (obj.soap_note && typeof obj.soap_note === 'object' && !obj.soap_note.type) {
     return { format: 'data', data: obj };
   }
   
@@ -74,12 +74,12 @@ export function detectAndNormalizeResponse(obj) {
     const soapNoteSchema = obj.properties.soap_note;
     const billingSchema = obj.properties.billing;
     
-    if (soapNoteSchema && billingSchema) {
+    if (soapNoteSchema) {
       return { 
         format: 'schema_wrapped',
         data: { 
           soap_note: soapNoteSchema.properties || soapNoteSchema,
-          billing: billingSchema.properties || billingSchema
+          ...(billingSchema && { billing: billingSchema.properties || billingSchema })
         },
         warning: 'LLM returned schema-wrapped response instead of data'
       };

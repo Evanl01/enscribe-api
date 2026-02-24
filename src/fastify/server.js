@@ -30,7 +30,7 @@ import { registerPromptLlmJobsRoutes } from './routes/promptLlmJobs.routes.js';
 async function createFastifyApp(options = {}) {
   const {
     port = process.env.FASTIFY_PORT || 3001,
-    host = process.env.FASTIFY_HOST || '127.0.0.1',
+    host = process.env.FASTIFY_HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0'),
     environment = process.env.NODE_ENV || 'development',
   } = options;
 
