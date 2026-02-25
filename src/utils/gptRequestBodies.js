@@ -71,6 +71,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
         max_completion_tokens: 10000,
         response_format: {
             type: "json_schema",
+            strict: true,
             json_schema: {
                 name: "soap_and_billing",
                 schema: {
@@ -78,9 +79,11 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                     properties: {
                         soap_note: {
                             type: SchemaType.OBJECT,
+                            additionalProperties: false,
                             properties: {
                                 subjective: {
                                     type: SchemaType.OBJECT,
+                                    additionalProperties: false,
                                     description: "Subjective findings - what the patient reports (symptoms, concerns, history)",
                                     properties: {
                                         "Chief complaint": { type: SchemaType.STRING, description: "Chief complaint of the patient" },
@@ -90,11 +93,11 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                         Medications: { type: SchemaType.STRING, description: "Current medications" },
                                         Allergies: { type: SchemaType.STRING, description: "Known allergies" }
                                     },
-                                    required: ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"],
-                                    propertyOrdering: ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"],
+                                    required: ["Chief complaint", "HPI", "History", "ROS", "Medications", "Allergies"]
                                 },
                                 objective: {
                                     type: SchemaType.OBJECT,
+                                    additionalProperties: false,
                                     description: "Objective clinical observations - measurable/observable findings (vitals, physical exam, lab results). If not mentioned in transcript, assume result is normal/as expected.",
                                     properties: {
                                         HEENT: { type: SchemaType.STRING, description: "HEENT (Head, Eyes, Ears, Nose, Throat) exam findings" },
@@ -103,8 +106,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                                         Musculoskeletal: { type: SchemaType.STRING, description: "Musculoskeletal exam findings" },
                                         Other: { type: SchemaType.STRING, description: "Other objective findings" }
                                     },
-                                    required: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"],
-                                    propertyOrdering: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"]
+                                    required: ["HEENT", "General", "Cardiovascular", "Musculoskeletal", "Other"]
                                 },
                                 assessment: { type: SchemaType.STRING, description: "Clinical assessment and diagnosis based on subjective and objective findings" },
                                 plan: { type: SchemaType.STRING, description: "Based solely on the transcript, summarize a treatment plan, medications, follow-up instructions and next steps. Do not include your own assumptions or inferences, and only output data if present in the transcript, otherwise leave it blank." }
@@ -113,6 +115,7 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
                         },
                         billing: {
                             type: SchemaType.OBJECT,
+                            additionalProperties: false,
                             properties: {
                                 icd10_codes: {
                                     type: "array",

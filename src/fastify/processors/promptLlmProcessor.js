@@ -18,7 +18,6 @@ import { unmask_phi } from '../../utils/maskPhiHelper.js';
 import { transcribe_expand_mask } from '../controllers/transcribeController.js';
 import { getAzureOpenAIConfig } from '../../utils/azureOpenaiConfig.js';
 import parseSoapNotes from '../../utils/parseSoapNotes.js';
-import { validateSoapAndBilling, detectAndNormalizeResponse } from '../../utils/soapNoteValidator.js';
 
 /**
  * Helper: Clean raw text from LLMs to normalize problematic characters for EHR systems
@@ -291,41 +290,11 @@ export async function promptLlmProcessor(jobId, userId, authorizationHeader) {
       throw new Error(`Failed to parse SOAP note JSON: ${error.message}`);
     }
 
-    // Detect and normalize response (handles both data and schema-wrapped formats)
-    const { format, data, warning } = detectAndNormalizeResponse(soapNoteAndBillingResult);
-
-    if (format === 'unknown') {
-      throw new Error('Unrecognized response format. Expected SOAP note data or schema structure.');
-    }
-
-    if (warning) {
-      console.warn(`[promptLlmProcessor] ${jobId}: ${warning} - Auto-normalizing`);
-    }
-
-    // Inject default billing if missing (LLM sometimes fails to generate)
-    if (!data.billing || typeof data.billing !== 'object') {
-      console.warn(`[promptLlmProcessor] ${jobId}: billing object missing, injecting defaults`);
-      data.billing = {
-        icd10_codes: [],
-        billing_code: '',
-        additional_inquiries: ''
-      };
-    }
-
-    // Validate the normalized data
-    validateSoapAndBilling(data);
+    // Store raw SOAP note string (parsing will be done on demand via parseSoapNotes utility)
+    const soapNoteText = JSON.stringify(soapNoteAndBillingResult);
 
     const soapEndTime = Date.now();
     console.log(`[promptLlmProcessor] ${jobId}: SOAP note complete (${(soapEndTime - soapStartTime) / 1000}s)`);
-
-    // Extract only required fields, removing any extra metadata (e.g., "type" wrapper field)
-    const cleanData = {
-      soap_note: data.soap_note,
-      billing: data.billing,
-    };
-
-    // Store raw SOAP note string (parsing will be done on demand via parseSoapNotes utility)
-    const soapNoteText = JSON.stringify(cleanData);
 
     // Step 4: Update to complete status
     await updateJobStatus(jobId, 'complete', {
