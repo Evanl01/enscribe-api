@@ -71,8 +71,8 @@ export function getSoapNoteAndBillingRequestBody(transcript) {
         max_completion_tokens: 10000,
         response_format: {
             type: "json_schema",
-            strict: true,
             json_schema: {
+                strict: true,
                 name: "soap_and_billing",
                 schema: {
                     type: SchemaType.OBJECT,
